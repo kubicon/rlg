@@ -14,13 +14,7 @@ def neurd_loss(
   References:
 
   [1] https://arxiv.org/abs/1906.00190
-  """
-  # logit_mean = jnp.sum(logits * action_mask, axis=-1, keepdims=True) / jnp.sum(
-  #   action_mask, axis=-1, keepdims=True
-  # )
-
-  # logits_centered = logits - logit_mean
-  # logits_centered = logits_centered * action_mask
+  """ 
 
   logits_centered = logits * legal_actions
 
