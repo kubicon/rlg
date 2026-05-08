@@ -36,4 +36,4 @@ trainer:
   n_steps: 1000
   log_every: 100
   checkpoint_every: 200
-  checkpoint_dir: checkpoints/ppo_goofspiel
+  checkpoint_dir: data/ppo_goofspiel
