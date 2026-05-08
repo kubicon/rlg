@@ -10,9 +10,20 @@ proceeds internally.
 """
 from __future__ import annotations
 import abc
-from typing import Any
+from typing import Any, NamedTuple
 
 import jax
+
+
+class TrainingState(NamedTuple):
+    params:      Any        # network parameters pytree
+    opt_state:   Any        # optax optimizer state
+    env_state:   Any        # current environment state
+    agent_state: Any        # recurrent carry (None for stateless agents)
+    rng:         jax.Array  # PRNG key, threaded through every step
+    step:        jax.Array  # int32 scalar, counts training iterations
+    extras:      Any = None # algorithm-specific state (e.g. magnet_params for MMD)
+
 
 AlgorithmState = Any  # concrete algorithms define their own pytree
 

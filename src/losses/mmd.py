@@ -31,5 +31,13 @@ def mmd_loss(
   value_loss   = ppo_value_loss(values, sample_values, returns, clip_eps)
   magnet_loss = kl_divergence(log_probs_all, magnet_log_probs_all)
   old_kl_loss = kl_divergence(log_probs_all, sample_log_probs_all)
-  entropy_loss = ppo_entropy_loss(log_probs_all, strategy) 
-  return policy_loss + vf_coef * value_loss + ent_coef * entropy_loss + magnet_loss * magnet_coef + old_kl_loss * old_policy_coef
+  entropy_loss = ppo_entropy_loss(log_probs_all, strategy)
+  total = (policy_loss + vf_coef * value_loss + ent_coef * entropy_loss
+           + magnet_coef * magnet_loss + old_policy_coef * old_kl_loss)
+  return total, {
+      'policy_loss':  policy_loss,
+      'value_loss':   value_loss,
+      'entropy_loss': entropy_loss,
+      'magnet_loss':  magnet_loss,
+      'old_kl_loss':  old_kl_loss,
+  }
