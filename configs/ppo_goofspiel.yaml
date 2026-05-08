@@ -1,0 +1,39 @@
+seed: 0
+
+env:
+  n_cards: 5
+  prize_order: descending  # random | ascending | descending
+  reward_type: binary       # difference | binary
+
+algorithm:
+  type: ppo
+  rollout_len: 64           # steps per iteration × num_players = total samples
+  n_epochs: 4
+  batch_size: 4          # rollout_len * num_players must be divisible by this
+  lr: 3.0e-4
+  clip_eps: 0.2
+  vf_coef: 0.5
+  ent_coef: 0.01
+  gamma: 1.0
+  gae_lambda: 0.95
+
+  agent:
+    type: actor_critic
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden: [128, 128]
+        activation: relu
+      head1:
+        type: categorical
+        n_actions: ~         # null → filled from env.num_actions at runtime
+      head2:
+        type: value
+
+trainer:
+  n_steps: 1000
+  log_every: 100
+  checkpoint_every: 200
+  checkpoint_dir: checkpoints/ppo_goofspiel

@@ -1,0 +1,157 @@
+# Example network configs for rlg.
+# Load with:
+#   import yaml
+#   from rlg.networks.configs import parse_network_config, build_network
+#
+#   with open('configs/example.yaml') as f:
+#       raw = yaml.safe_load(f)
+#
+#   cfg     = parse_network_config(raw['network'])
+#   network = cfg.build()
+#   params  = network.init_params(key, x)
+#   state   = network.init_state(params)
+#
+# Uncomment exactly one 'network' block before loading.
+
+
+# ── PPO / A2C — shared MLP backbone ───────────────────────────────────────
+# type: twin_head — one torso, two independent heads (actor + critic here,
+# but the same structure works for any task with two outputs).
+network:
+  type: twin_head
+  torso:
+    type: mlp
+    feature_dim: 256
+    hidden: [256, 256]
+    activation: relu
+  head1:
+    type: categorical
+    n_actions: 18
+  head2:
+    type: value
+
+
+# ── SAC actor — Gaussian policy ────────────────────────────────────────────
+# type: network — single torso + single head, the simplest case.
+# network:
+#   type: network
+#   torso:
+#     type: mlp
+#     feature_dim: 256
+#     hidden: [256, 256]
+#     activation: relu
+#   head:
+#     type: gaussian
+#     action_dim: 6
+#     log_std_min: -5.0
+#     log_std_max: 2.0
+
+
+# ── SAC / TD3 twin critics — separate pathways ────────────────────────────
+# type: separate_twin_head — two fully independent (torso, head) pairs.
+# No shared parameters; each critic has its own backbone.
+# network:
+#   type: separate_twin_head
+#   torso1:
+#     type: mlp
+#     feature_dim: 256
+#     hidden: [256, 256]
+#     activation: relu
+#   head1:
+#     type: q
+#     n_actions: 1
+#   torso2:
+#     type: mlp
+#     feature_dim: 256
+#     hidden: [256, 256]
+#     activation: relu
+#   head2:
+#     type: q
+#     n_actions: 1
+
+
+# ── DQN — Q-network ────────────────────────────────────────────────────────
+# type: network with a Q head.
+# network:
+#   type: network
+#   torso:
+#     type: mlp
+#     feature_dim: 512
+#     hidden: [512, 512]
+#     activation: relu
+#   head:
+#     type: q
+#     n_actions: 18
+
+
+# ── Dueling DQN — value + advantage decomposition ─────────────────────────
+# type: twin_head with ValueHead + AdvantageHead. The V + A - mean(A)
+# combination is done in the loss, not the network.
+# network:
+#   type: twin_head
+#   torso:
+#     type: resnet
+#     feature_dim: 256
+#     channels: [16, 32, 32]
+#     blocks_per_stage: [2, 2, 2]
+#     activation: relu
+#   head1:
+#     type: value
+#   head2:
+#     type: advantage
+#     n_actions: 18
+
+
+# ── Recurrent PPO — shared LSTM backbone ──────────────────────────────────
+# network:
+#   type: twin_head
+#   torso:
+#     type: lstm
+#     feature_dim: 256
+#     hidden_dim: 256
+#   head1:
+#     type: categorical
+#     n_actions: 18
+#   head2:
+#     type: value
+
+
+# ── Relational — Transformer backbone ─────────────────────────────────────
+# network:
+#   type: twin_head
+#   torso:
+#     type: transformer
+#     feature_dim: 256
+#     n_heads: 4
+#     n_layers: 3
+#     mlp_dim: 512
+#     activation: gelu
+#     norm: layer
+#   head1:
+#     type: categorical
+#     n_actions: 18
+#   head2:
+#     type: value
+
+
+# ── Mixed architectures — Transformer critic, LSTM actor ──────────────────
+# type: separate_twin_head lets each pathway use a completely different architecture.
+# network:
+#   type: separate_twin_head
+#   torso1:
+#     type: lstm
+#     feature_dim: 256
+#     hidden_dim: 256
+#   head1:
+#     type: categorical
+#     n_actions: 18
+#   torso2:
+#     type: transformer
+#     feature_dim: 256
+#     n_heads: 4
+#     n_layers: 3
+#     mlp_dim: 512
+#     activation: gelu
+#     norm: layer
+#   head2:
+#     type: value
