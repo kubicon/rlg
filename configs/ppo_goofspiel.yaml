@@ -8,7 +8,7 @@ env:
 algorithm:
   type: ppo
   n_epochs: 4
-  batch_size: 4
+  batch_size: 64
   lr: 3.0e-4
   clip_eps: 0.2
   vf_coef: 0.5
@@ -39,3 +39,4 @@ trainer:
   log_every: 100
   checkpoint_every: 200
   checkpoint_dir: data/ppo_goofspiel
+  save_metrics: false

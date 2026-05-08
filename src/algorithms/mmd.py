@@ -141,16 +141,8 @@ class MMD(PPOBase):
             epoch_fn, (params, opt_state), None, length=self.n_epochs)
 
         # Polyak update: target ← τ·params + (1−τ)·target
-        target_params = jax.tree.map(
-            lambda t, p: self.target_update_rate * p + (1.0 - self.target_update_rate) * t,
-            state.extras['target_params'], params,
-        )
-
-        # Hard reset: magnet ← params every magnet_interval steps
-        magnet_params = jax.tree.map(
-            lambda m, p: jnp.where(state.step % self.magnet_interval == 0, p, m),
-            state.extras['magnet_params'], params,
-        )
+        target_params = optax.incremental_update(params, state.extras['target_params'], self.target_update_rate) 
+        magnet_params = optax.periodic_update(params, state.extras['magnet_params'], state.step, self.magnet_interval) 
 
         return TrainingState(
             params      = params,

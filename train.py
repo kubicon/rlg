@@ -19,7 +19,7 @@ from src.networks.configs import build_network
 from src.agents.actor_critic import ActorCriticAgent
 from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
-from src.trainers.trainer import StandardTrainer, StdoutLogger
+from src.trainers.trainer import StandardTrainer, StdoutLogger, load_metrics
 
 _ALGORITHMS = {
     'ppo': PPO,
