@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-"""Train an RL agent on Goofspiel.
+"""Train an RL agent on any registered environment.
 
 Usage:
     python train.py                                        # default PPO config
-    python train.py configs/mmd_goofspiel.yaml             # MMD
+    python train.py configs/mmd_goofspiel.yaml             # MMD on Goofspiel
+    python train.py configs/ppo_leduc.yaml                 # PPO on Leduc Hold'em
+    python train.py configs/ppo_battleship.yaml            # PPO on Battleship
     python train.py configs/ppo_goofspiel.yaml --resume    # resume from latest checkpoint
 """
 
@@ -15,7 +17,7 @@ import sys
 import yaml
 import jax
 
-from src.envs.goofspiel import Goofspiel
+from src.envs import build_env
 from src.networks.configs import build_network
 from src.agents.actor_critic import ActorCriticAgent
 from src.algorithms.ppo import PPO
@@ -74,11 +76,8 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
     cfg = yaml.safe_load(f)
 
   # ── Environment ────────────────────────────────────────────────────────
-  env = Goofspiel(**cfg["env"])
-  print(
-    f"env: Goofspiel(n_cards={env.n_cards}, prize_order={env.prize_order},"
-    f" reward_type={env.reward_type})"
-  )
+  env = build_env(cfg["env"])
+  print(f"env: {env.__class__.__name__}  players={env.num_players}  actions={env.num_actions}  max_len={env.max_length}")
 
   # ── Agent ──────────────────────────────────────────────────────────────
   alg_cfg = dict(cfg["algorithm"])

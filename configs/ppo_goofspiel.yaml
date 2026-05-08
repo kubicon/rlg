@@ -1,6 +1,7 @@
 seed: 0
 
 env:
+  name: goofspiel
   n_cards: 5
   prize_order: descending  # random | ascending | descending
   reward_type: binary       # difference | binary
