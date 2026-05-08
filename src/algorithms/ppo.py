@@ -40,24 +40,22 @@ class PPOBase(Algorithm):
 
     def __init__(
         self,
-        env:         Env,
-        agent:       Agent,
-        rollout_len: int   = 128,
-        n_epochs:    int   = 4,
-        batch_size:  int   = 4,
-        lr:          float = 3e-4,
-        clip_eps:    float = 0.2,
-        vf_coef:     float = 0.5,
-        ent_coef:    float = 0.01,
-        gamma:       float = 0.99,
-        gae_lambda:  float = 0.95,
-        delta_clip:  float = 1.0,
-        trace_clip:  float = 1.0,
+        env:        Env,
+        agent:      Agent,
+        n_epochs:   int   = 4,
+        batch_size: int   = 4,
+        lr:         float = 3e-4,
+        clip_eps:   float = 0.2,
+        vf_coef:    float = 0.5,
+        ent_coef:   float = 0.01,
+        gamma:      float = 0.99,
+        gae_lambda: float = 0.95,
+        delta_clip: float = 1.0,
+        trace_clip: float = 1.0,
     ) -> None:
-        self.env         = env
-        self.agent       = agent
-        self.rollout_len = rollout_len
-        self.n_epochs    = n_epochs
+        self.env       = env
+        self.agent     = agent
+        self.n_epochs  = n_epochs
         self.batch_size  = batch_size
         self.clip_eps    = clip_eps
         self.vf_coef     = vf_coef
@@ -130,10 +128,9 @@ class PPO(PPOBase):
     providing more stable training targets than the per-rollout old policy.
 
     Args:
-        env:         Env instance (simultaneous or single-player).
-        agent:       Agent whose player_evaluate drives rollout and re-evaluation.
-        rollout_len: Steps per episode (defaults to env.max_length).
-        n_epochs:    Gradient passes over each rollout.
+        env:        Env instance (simultaneous or single-player).
+        agent:      Agent whose player_evaluate drives rollout and re-evaluation.
+        n_epochs:   Gradient passes over each rollout.
         batch_size:  Independent episodes per iteration (B).
         lr:          Adam learning rate.
         clip_eps:    PPO clip ratio ε; also used for value-function clipping.

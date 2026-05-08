@@ -1,15 +1,19 @@
-"""MMD algorithm — PPO variant with a slowly-updated magnet policy.
+"""MMD algorithm — PPO variant with two auxiliary parameter sets.
 
-Extends PPOBase with a second set of parameters (`magnet_params`) that track
-the main policy via Polyak averaging after every training step:
+Two extra parameter sets are maintained alongside the main params:
 
-    magnet_params ← τ · params + (1 − τ) · magnet_params
+  target_params  — Polyak-averaged copy, updated every step:
+                       target ← τ · params + (1 − τ) · target
+                   Used for stable GAE bootstrapping and value-loss clipping,
+                   exactly as in PPO.
 
-The MMD loss adds two KL terms on top of standard PPO:
-  - magnet_loss  : KL(current ‖ magnet)   — pulls policy toward magnet
-  - old_kl_loss  : KL(current ‖ old)      — PPO-style trust-region penalty
+  magnet_params  — Hard-reset copy, replaced with current params every k steps:
+                       magnet ← params   if step % magnet_interval == 0
+                               magnet    otherwise
+                   Used as the reference policy in the KL magnet loss term.
 
-magnet_params are stored in TrainingState.extras['magnet_params'].
+Both are stored in TrainingState.extras:
+    {'target_params': ..., 'magnet_params': ...}
 """
 from __future__ import annotations
 
@@ -27,45 +31,46 @@ from ..losses.mmd import mmd_loss
 
 
 class MMD(PPOBase):
-    """PPO with a Polyak-averaged magnet policy.
+    """PPO with a Polyak target network and a periodically-reset magnet policy.
 
     Args:
         env, agent, rollout_len, n_epochs, batch_size, lr,
         clip_eps, vf_coef, ent_coef, gamma, gae_lambda,
-        delta_clip, trace_clip: inherited from PPOBase.
-        magnet_coef:     Weight of KL(current ‖ magnet) term.
-        old_policy_coef: Weight of KL(current ‖ old policy) term.
-        polyak_tau:      Polyak averaging rate for magnet update (closer to 1
-                         = magnet tracks params faster).
+        delta_clip, trace_clip:  inherited from PPOBase.
+        magnet_coef:             Weight of KL(current ‖ magnet) term.
+        old_policy_coef:         Weight of KL(current ‖ old policy) term.
+        target_update_rate:      Polyak τ for target_params update.
+        magnet_interval:         Steps between hard resets of magnet_params.
     """
 
     def __init__(
         self,
-        env:             Env,
-        agent:           Agent,
-        rollout_len:     int   = 128,
-        n_epochs:        int   = 4,
-        batch_size:      int   = 4,
-        lr:              float = 3e-4,
-        clip_eps:        float = 0.2,
-        vf_coef:         float = 0.5,
-        ent_coef:        float = 0.01,
-        gamma:           float = 0.99,
-        gae_lambda:      float = 0.95,
-        delta_clip:      float = 1.0,
-        trace_clip:      float = 1.0,
-        magnet_coef:     float = 1.0,
-        old_policy_coef: float = 1.0,
-        polyak_tau:      float = 0.005,
+        env:                Env,
+        agent:              Agent,
+        n_epochs:           int   = 4,
+        batch_size:         int   = 4,
+        lr:                 float = 3e-4,
+        clip_eps:           float = 0.2,
+        vf_coef:            float = 0.5,
+        ent_coef:           float = 0.01,
+        gamma:              float = 0.99,
+        gae_lambda:         float = 0.95,
+        delta_clip:         float = 1.0,
+        trace_clip:         float = 1.0,
+        magnet_coef:        float = 0.15,
+        old_policy_coef:    float = 0.05,
+        target_update_rate: float = 0.001,
+        magnet_interval:    int   = 2000,
     ) -> None:
         super().__init__(
-            env, agent, rollout_len, n_epochs, batch_size, lr,
+            env, agent, n_epochs, batch_size, lr,
             clip_eps, vf_coef, ent_coef, gamma, gae_lambda,
             delta_clip, trace_clip,
         )
-        self.magnet_coef     = magnet_coef
-        self.old_policy_coef = old_policy_coef
-        self.polyak_tau      = polyak_tau
+        self.magnet_coef        = magnet_coef
+        self.old_policy_coef    = old_policy_coef
+        self.target_update_rate = target_update_rate
+        self.magnet_interval    = magnet_interval
 
     # ── Init ──────────────────────────────────────────────────────────────────
 
@@ -78,7 +83,7 @@ class MMD(PPOBase):
             agent_state = agent_state,
             rng         = key,
             step        = jnp.zeros((), jnp.int32),
-            extras      = {'magnet_params': params},
+            extras      = {'target_params': params, 'magnet_params': params},
         )
 
     # ── Public step ───────────────────────────────────────────────────────────
@@ -88,12 +93,16 @@ class MMD(PPOBase):
         _, _, _, episodes = collect_episodes(
             self.env, self.agent, state.params, collect_key, self.batch_size)
 
-        advantages, targets = self._compute_advantages(
-            episodes.rewards, episodes.agent_output.value, episodes.dones)
+        # Both auxiliary networks are fixed across all epochs — precompute once.
+        target_out    = self._eval_params(state.extras['target_params'], episodes)
+        target_values = lax.stop_gradient(target_out.value)    # (B, T, P)
 
-        # Magnet logits are fixed throughout all epochs — precompute once.
         magnet_out    = self._eval_params(state.extras['magnet_params'], episodes)
-        magnet_logits = lax.stop_gradient(magnet_out.logits)  # (B, T, P, A)
+        magnet_logits = lax.stop_gradient(magnet_out.logits)   # (B, T, P, A)
+
+        # Use target values for GAE bootstrapping (stable value estimates).
+        advantages, targets = self._compute_advantages(
+            episodes.rewards, target_values, episodes.dones)
 
         params, opt_state = state.params, state.opt_state
         valid = self._valid_mask(episodes.dones)
@@ -113,8 +122,8 @@ class MMD(PPOBase):
                     agent_out.logits,
                     episodes.legal_actions,
                     episodes.actions,
-                    episodes.agent_output.logits,
-                    episodes.agent_output.value,
+                    episodes.agent_output.logits,  # trajectory sampling policy
+                    target_values,                 # stable value-loss clipping ref
                     magnet_logits,
                     advantages,
                     targets,
@@ -131,9 +140,15 @@ class MMD(PPOBase):
         (params, opt_state), epoch_metrics = jax.lax.scan(
             epoch_fn, (params, opt_state), None, length=self.n_epochs)
 
-        # Polyak update: magnet ← τ·params + (1−τ)·magnet
+        # Polyak update: target ← τ·params + (1−τ)·target
+        target_params = jax.tree.map(
+            lambda t, p: self.target_update_rate * p + (1.0 - self.target_update_rate) * t,
+            state.extras['target_params'], params,
+        )
+
+        # Hard reset: magnet ← params every magnet_interval steps
         magnet_params = jax.tree.map(
-            lambda m, p: self.polyak_tau * p + (1.0 - self.polyak_tau) * m,
+            lambda m, p: jnp.where(state.step % self.magnet_interval == 0, p, m),
             state.extras['magnet_params'], params,
         )
 
@@ -144,5 +159,5 @@ class MMD(PPOBase):
             agent_state = state.agent_state,
             rng         = rng,
             step        = state.step + 1,
-            extras      = {'magnet_params': magnet_params},
+            extras      = {'target_params': target_params, 'magnet_params': magnet_params},
         ), jax.tree.map(jnp.mean, epoch_metrics)
