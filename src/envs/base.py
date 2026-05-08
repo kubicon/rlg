@@ -10,6 +10,7 @@ Sequential games:     current_player(state) identifies who acts. Inactive
                       True entry (a dummy no-op), which forces a deterministic
                       policy distribution and contributes zero policy gradient.
 """
+
 from __future__ import annotations
 import abc
 from typing import Any
@@ -17,11 +18,11 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
-PRNGKey    = jax.Array
-Action     = Any          # shape (num_players, *action_shape)
+PRNGKey = jax.Array
+Action = Any  # shape (num_players, *action_shape)
 Observation = Any
-Info       = dict[str, jax.Array]
-EnvState   = Any          # concrete envs define their own pytree state
+Info = dict[str, jax.Array]
+EnvState = Any  # concrete envs define their own pytree state
 
 
 class Env(abc.ABC):
@@ -53,9 +54,9 @@ class Env(abc.ABC):
   @abc.abstractmethod
   def apply_action(
     self,
-    state:   EnvState,
+    state: EnvState,
     actions: Action,
-    key:     PRNGKey,
+    key: PRNGKey,
   ) -> tuple[EnvState, jax.Array, jax.Array, Info]:
     """Advance the environment by one step.
 
@@ -94,7 +95,7 @@ class Env(abc.ABC):
   # ── Action legality & turn order ────────────────────────────────────────
 
   @abc.abstractmethod
-  def legal_actions(self, state: EnvState, player_id: jax.Array) -> jax.Array:
+  def legal_actions(self, state: EnvState, player_id: jax.Array | int) -> jax.Array:
     """Boolean mask of shape (num_actions,) indicating which actions are legal.
 
     Sequential games must return jnp.zeros(num_actions, bool).at[0].set(True)
@@ -105,7 +106,7 @@ class Env(abc.ABC):
   # ── Perfect-recall representations ──────────────────────────────────────
 
   @abc.abstractmethod
-  def information_set(self, state: EnvState, player_id: jax.Array) -> Observation:
+  def information_set(self, state: EnvState, player_id: jax.Array | int) -> Observation:
     """Ordered history of everything player_id has observed and done.
 
     Unlike player_observation (a snapshot), this encodes the full sequence of

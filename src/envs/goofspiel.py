@@ -25,6 +25,7 @@ Perfect-recall sizes (ordered per-turn history, all binary float32):
   information_set omits the opponent card entirely — on draws it equals own_card
   (derivable from own_card + draw result bit), on wins/losses it is unknown.
 """
+
 from __future__ import annotations
 from typing import NamedTuple
 
@@ -35,12 +36,14 @@ from .base import Env, Info, PRNGKey
 
 
 class GoofspielState(NamedTuple):
-  prize_deck:     jax.Array  # (n_cards,)   int32   — full prize order, all turns
-  turn:           jax.Array  # ()           int32   — current step, 0-indexed
-  hands:          jax.Array  # (2, n_cards) bool    — remaining cards per player
-  scores:         jax.Array  # (2,)         float32 — accumulated prize values
-  turn_results:   jax.Array  # (n_cards,)   int32   — -1 not played | 0 p0 | 1 p1 | 2 draw
-  action_history: jax.Array  # (2, n_cards) int32   — 0-indexed card played at each turn, -1 if not yet
+  prize_deck: jax.Array  # (n_cards,)   int32   — full prize order, all turns
+  turn: jax.Array  # ()           int32   — current step, 0-indexed
+  hands: jax.Array  # (2, n_cards) bool    — remaining cards per player
+  scores: jax.Array  # (2,)         float32 — accumulated prize values
+  turn_results: jax.Array  # (n_cards,)   int32   — -1 not played | 0 p0 | 1 p1 | 2 draw
+  action_history: (
+    jax.Array
+  )  # (2, n_cards) int32   — 0-indexed card played at each turn, -1 if not yet
 
 
 class Goofspiel(Env):
@@ -56,15 +59,19 @@ class Goofspiel(Env):
 
   def __init__(
     self,
-    n_cards:     int = 13,
-    prize_order: str = 'random',
-    reward_type: str = 'difference',
+    n_cards: int = 13,
+    prize_order: str = "random",
+    reward_type: str = "difference",
   ) -> None:
-    if prize_order not in ('random', 'ascending', 'descending'):
-      raise ValueError(f"prize_order must be 'random', 'ascending', or 'descending', got '{prize_order}'")
-    if reward_type not in ('difference', 'binary'):
-      raise ValueError(f"reward_type must be 'difference' or 'binary', got '{reward_type}'")
-    self.n_cards     = n_cards
+    if prize_order not in ("random", "ascending", "descending"):
+      raise ValueError(
+        f"prize_order must be 'random', 'ascending', or 'descending', got '{prize_order}'"
+      )
+    if reward_type not in ("difference", "binary"):
+      raise ValueError(
+        f"reward_type must be 'difference' or 'binary', got '{reward_type}'"
+      )
+    self.n_cards = n_cards
     self.prize_order = prize_order
     self.reward_type = reward_type
 
@@ -85,27 +92,27 @@ class Goofspiel(Env):
   # ── State lifecycle ──────────────────────────────────────────────────────
 
   def init_state(self, key: PRNGKey) -> GoofspielState:
-    if self.prize_order == 'random':
+    if self.prize_order == "random":
       prize_deck = jax.random.permutation(key, self.n_cards) + 1
-    elif self.prize_order == 'ascending':
+    elif self.prize_order == "ascending":
       prize_deck = jnp.arange(1, self.n_cards + 1)
-    else:                                       # descending
+    else:  # descending
       prize_deck = jnp.arange(self.n_cards, 0, -1)
 
     return GoofspielState(
-      prize_deck     = prize_deck.astype(jnp.int32),
-      turn           = jnp.zeros((), dtype=jnp.int32),
-      hands          = jnp.ones((2, self.n_cards), dtype=jnp.bool_),
-      scores         = jnp.zeros(2, dtype=jnp.float32),
-      turn_results   = jnp.full(self.n_cards, -1, dtype=jnp.int32),
-      action_history = jnp.full((2, self.n_cards), -1, dtype=jnp.int32),
+      prize_deck=prize_deck.astype(jnp.int32),
+      turn=jnp.zeros((), dtype=jnp.int32),
+      hands=jnp.ones((2, self.n_cards), dtype=jnp.bool_),
+      scores=jnp.zeros(2, dtype=jnp.float32),
+      turn_results=jnp.full(self.n_cards, -1, dtype=jnp.int32),
+      action_history=jnp.full((2, self.n_cards), -1, dtype=jnp.int32),
     )
 
   def apply_action(
     self,
-    state:   GoofspielState,
-    actions: jax.Array,       # (2,) int32 — 0-indexed card chosen by each player
-    key:     PRNGKey,
+    state: GoofspielState,
+    actions: jax.Array,  # (2,) int32 — 0-indexed card chosen by each player
+    key: PRNGKey,
   ) -> tuple[GoofspielState, jax.Array, jax.Array, Info]:
     prize = state.prize_deck[state.turn]
 
@@ -116,29 +123,36 @@ class Goofspiel(Env):
     p0_wins = card0 > card1
     p1_wins = card1 > card0
 
-    new_scores = state.scores + jnp.array([
-      jnp.where(p0_wins, prize, 0),
-      jnp.where(p1_wins, prize, 0),
-    ], dtype=jnp.float32)
+    new_scores = state.scores + jnp.array(
+      [
+        jnp.where(p0_wins, prize, 0),
+        jnp.where(p1_wins, prize, 0),
+      ],
+      dtype=jnp.float32,
+    )
 
-    new_hands = jnp.stack([
-      state.hands[0].at[actions[0]].set(False),
-      state.hands[1].at[actions[1]].set(False),
-    ])
+    new_hands = jnp.stack(
+      [
+        state.hands[0].at[actions[0]].set(False),
+        state.hands[1].at[actions[1]].set(False),
+      ]
+    )
 
-    result          = jnp.where(p0_wins, 0, jnp.where(p1_wins, 1, 2))
+    result = jnp.where(p0_wins, 0, jnp.where(p1_wins, 1, 2))
     new_turn_results = state.turn_results.at[state.turn].set(result)
 
     new_turn = state.turn + 1
-    done     = (new_turn >= self.n_cards).astype(jnp.bool_)
+    done = (new_turn >= self.n_cards).astype(jnp.bool_)
 
-    if self.reward_type == 'difference':
-      terminal_r = jnp.array([
-        new_scores[0] - new_scores[1],
-        new_scores[1] - new_scores[0],
-      ])
-    else:                                       # binary
-      winner     = jnp.sign(new_scores[0] - new_scores[1])
+    if self.reward_type == "difference":
+      terminal_r = jnp.array(
+        [
+          new_scores[0] - new_scores[1],
+          new_scores[1] - new_scores[0],
+        ]
+      )
+    else:  # binary
+      winner = jnp.sign(new_scores[0] - new_scores[1])
       terminal_r = jnp.array([winner, -winner])
 
     # Reward is zero every step except the terminal one
@@ -147,12 +161,12 @@ class Goofspiel(Env):
     new_action_history = state.action_history.at[:, state.turn].set(actions)
 
     new_state = GoofspielState(
-      prize_deck     = state.prize_deck,
-      turn           = new_turn,
-      hands          = new_hands,
-      scores         = new_scores,
-      turn_results   = new_turn_results,
-      action_history = new_action_history,
+      prize_deck=state.prize_deck,
+      turn=new_turn,
+      hands=new_hands,
+      scores=new_scores,
+      turn_results=new_turn_results,
+      action_history=new_action_history,
     )
     return new_state, rewards, done, {}
 
@@ -165,10 +179,12 @@ class Goofspiel(Env):
     so turn t shows t+1 cards total.
     """
     turn_idx = jnp.arange(self.n_cards, dtype=jnp.int32)
-    revealed  = (turn_idx <= state.turn).astype(jnp.float32)
+    revealed = (turn_idx <= state.turn).astype(jnp.float32)
     # Scatter: position prize_deck[t]-1 gets 1.0 if turn t is revealed.
     # prize_deck is a permutation so no duplicate indices.
-    return jnp.zeros(self.n_cards, dtype=jnp.float32).at[state.prize_deck - 1].set(revealed)
+    return (
+      jnp.zeros(self.n_cards, dtype=jnp.float32).at[state.prize_deck - 1].set(revealed)
+    )
 
   def _turn_result_bits(self, state: GoofspielState) -> jax.Array:
     """Three binary vectors of length n_cards concatenated: [p0_won | p1_won | draw].
@@ -178,7 +194,7 @@ class Goofspiel(Env):
     """
     p0_won = (state.turn_results == 0).astype(jnp.float32)
     p1_won = (state.turn_results == 1).astype(jnp.float32)
-    draw   = (state.turn_results == 2).astype(jnp.float32)
+    draw = (state.turn_results == 2).astype(jnp.float32)
     return jnp.concatenate([p0_won, p1_won, draw])
 
   # ── Observations ─────────────────────────────────────────────────────────
@@ -194,14 +210,18 @@ class Goofspiel(Env):
       jax.vmap(lambda p: env.player_observation(state, p))(jnp.arange(2))
     """
     hand = state.hands[player_id].astype(jnp.float32)
-    return jnp.concatenate([hand, self._prize_shown_bits(state), self._turn_result_bits(state)])
+    return jnp.concatenate(
+      [hand, self._prize_shown_bits(state), self._turn_result_bits(state)]
+    )
 
   def public_observation(self, state: GoofspielState) -> jax.Array:
     """Binary vector of length 4*n_cards.
 
     Layout: prize_shown (n_cards) | turn_results (3*n_cards)
     """
-    return jnp.concatenate([self._prize_shown_bits(state), self._turn_result_bits(state)])
+    return jnp.concatenate(
+      [self._prize_shown_bits(state), self._turn_result_bits(state)]
+    )
 
   def state_observation(self, state: GoofspielState) -> jax.Array:
     """Binary vector of length n_cards**2 + 5*n_cards that uniquely identifies the state.
@@ -214,14 +234,14 @@ class Goofspiel(Env):
     unavailable to players in the random-order variant.
     """
     prize_onehot = jax.nn.one_hot(state.prize_deck - 1, self.n_cards).flatten()
-    hand0        = state.hands[0].astype(jnp.float32)
-    hand1        = state.hands[1].astype(jnp.float32)
+    hand0 = state.hands[0].astype(jnp.float32)
+    hand1 = state.hands[1].astype(jnp.float32)
     return jnp.concatenate([prize_onehot, hand0, hand1, self._turn_result_bits(state)])
 
   # ── Action legality ───────────────────────────────────────────────────────
 
   def legal_actions(
-    self, state: GoofspielState, player_id: jax.Array
+    self, state: GoofspielState, player_id: jax.Array | int
   ) -> jax.Array:
     """Boolean mask of length n_cards: True for cards still in the player's hand."""
     return state.hands[player_id]
@@ -235,12 +255,12 @@ class Goofspiel(Env):
     that have not yet been reached (prize is shown at the start of each turn,
     so turn t is visible once state.turn >= t).
     """
-    turn_idx    = jnp.arange(self.n_cards, dtype=jnp.int32)
-    prize_shown = (turn_idx <= state.turn).astype(jnp.float32)        # (n_cards,)
+    turn_idx = jnp.arange(self.n_cards, dtype=jnp.int32)
+    prize_shown = (turn_idx <= state.turn).astype(jnp.float32)  # (n_cards,)
     return jax.nn.one_hot(state.prize_deck - 1, self.n_cards) * prize_shown[:, None]
 
   def information_set(
-    self, state: GoofspielState, player_id: jax.Array
+    self, state: GoofspielState, player_id: jax.Array | int
   ) -> jax.Array:
     """Ordered action history from player_id's perspective.
 
@@ -251,14 +271,18 @@ class Goofspiel(Env):
     The opponent card is excluded: on draw turns it equals own_card (derivable
     from own_card + draw result bit); on win/loss turns it is unknown.
     """
-    played   = (jnp.arange(self.n_cards) < state.turn).astype(jnp.float32)
-    own_enc  = jax.nn.one_hot(state.action_history[player_id], self.n_cards) * played[:, None]
-    return jnp.concatenate([
-      jax.nn.one_hot(player_id, 2),
-      self._prize_per_turn(state).flatten(),
-      own_enc.flatten(),
-      self._turn_result_bits(state),
-    ])
+    played = (jnp.arange(self.n_cards) < state.turn).astype(jnp.float32)
+    own_enc = (
+      jax.nn.one_hot(state.action_history[player_id], self.n_cards) * played[:, None]
+    )
+    return jnp.concatenate(
+      [
+        jax.nn.one_hot(player_id, 2),
+        self._prize_per_turn(state).flatten(),
+        own_enc.flatten(),
+        self._turn_result_bits(state),
+      ]
+    )
 
   def public_state(self, state: GoofspielState) -> jax.Array:
     """Ordered history of all public events.
@@ -270,13 +294,17 @@ class Goofspiel(Env):
     On draw turns card0 == card1, so a single shared card one-hot suffices.
     Win/loss turns contribute only to the result bits; the cards played remain hidden.
     """
-    draw_mask    = (state.turn_results == 2).astype(jnp.float32)
-    draw_card_enc = jax.nn.one_hot(state.action_history[0], self.n_cards) * draw_mask[:, None]
-    return jnp.concatenate([
-      self._prize_per_turn(state).flatten(),
-      draw_card_enc.flatten(),
-      self._turn_result_bits(state),
-    ])
+    draw_mask = (state.turn_results == 2).astype(jnp.float32)
+    draw_card_enc = (
+      jax.nn.one_hot(state.action_history[0], self.n_cards) * draw_mask[:, None]
+    )
+    return jnp.concatenate(
+      [
+        self._prize_per_turn(state).flatten(),
+        draw_card_enc.flatten(),
+        self._turn_result_bits(state),
+      ]
+    )
 
   def state_representation(self, state: GoofspielState) -> jax.Array:
     """Full ground-truth game trajectory (privileged — not available to agents).
@@ -288,9 +316,11 @@ class Goofspiel(Env):
     played = (jnp.arange(self.n_cards) < state.turn).astype(jnp.float32)
     p0_enc = jax.nn.one_hot(state.action_history[0], self.n_cards) * played[:, None]
     p1_enc = jax.nn.one_hot(state.action_history[1], self.n_cards) * played[:, None]
-    return jnp.concatenate([
-      self._prize_per_turn(state).flatten(),
-      p0_enc.flatten(),
-      p1_enc.flatten(),
-      self._turn_result_bits(state),
-    ])
+    return jnp.concatenate(
+      [
+        self._prize_per_turn(state).flatten(),
+        p0_enc.flatten(),
+        p1_enc.flatten(),
+        self._turn_result_bits(state),
+      ]
+    )

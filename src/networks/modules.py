@@ -7,15 +7,15 @@ import flax.linen as nn
 
 
 _ACTIVATIONS = {
-  'none':       lambda x: x,
-  'relu':       jnn.relu,
-  'gelu':       jnn.gelu,
-  'tanh':       jnp.tanh,
-  'sigmoid':    jnn.sigmoid,
-  'silu':       jnn.silu,
-  'elu':        jnn.elu,
-  'leaky_relu': jnn.leaky_relu,
-  'softplus':   jnn.softplus,
+  "none": lambda x: x,
+  "relu": jnn.relu,
+  "gelu": jnn.gelu,
+  "tanh": jnp.tanh,
+  "sigmoid": jnn.sigmoid,
+  "silu": jnn.silu,
+  "elu": jnn.elu,
+  "leaky_relu": jnn.leaky_relu,
+  "softplus": jnn.softplus,
 }
 
 
@@ -25,11 +25,14 @@ class Activation(nn.Module):
   Field is named 'kind' (not 'name') to avoid shadowing flax.linen.Module.name,
   which Flax uses internally as the module's scope identifier.
   """
-  kind: str = 'relu'
+
+  kind: str = "relu"
 
   def __call__(self, x: jax.Array) -> jax.Array:
     if self.kind not in _ACTIVATIONS:
-      raise ValueError(f"Unknown activation '{self.kind}'. Options: {list(_ACTIVATIONS)}")
+      raise ValueError(
+        f"Unknown activation '{self.kind}'. Options: {list(_ACTIVATIONS)}"
+      )
     return _ACTIVATIONS[self.kind](x)
 
 
@@ -41,17 +44,20 @@ class Normalization(nn.Module):
 
   Field is named 'kind' (not 'name') to avoid shadowing flax.linen.Module.name.
   """
-  kind: str = 'none'
+
+  kind: str = "none"
   num_groups: int = 32
 
   @nn.compact
   def __call__(self, x: jax.Array) -> jax.Array:
-    if self.kind == 'none':
+    if self.kind == "none":
       return x
-    if self.kind == 'layer':
+    if self.kind == "layer":
       return nn.LayerNorm()(x)
-    if self.kind == 'rms':
+    if self.kind == "rms":
       return nn.RMSNorm()(x)
-    if self.kind == 'group':
+    if self.kind == "group":
       return nn.GroupNorm(self.num_groups)(x)
-    raise ValueError(f"Unknown normalization '{self.kind}'. Options: layer, rms, group, none")
+    raise ValueError(
+      f"Unknown normalization '{self.kind}'. Options: layer, rms, group, none"
+    )

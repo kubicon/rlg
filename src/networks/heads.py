@@ -9,6 +9,7 @@ from .base import Head
 
 class CategoricalHead(Head):
   """Outputs logits over n_actions for a categorical distribution."""
+
   n_actions: int
 
   @nn.compact
@@ -18,6 +19,7 @@ class CategoricalHead(Head):
 
 class GaussianHead(Head):
   """Outputs (mean, log_std) for a Gaussian distribution."""
+
   action_dim: int
   log_std_min: float = -20.0
   log_std_max: float = 2.0
@@ -31,6 +33,7 @@ class GaussianHead(Head):
 
 class QHead(Head):
   """Outputs Q-values for each action: shape (..., n_actions)."""
+
   n_actions: int
 
   @nn.compact
@@ -40,6 +43,7 @@ class QHead(Head):
 
 class DistributionalQHead(Head):
   """Outputs atom logits for distributional RL: shape (..., n_actions, n_atoms)."""
+
   n_actions: int
   n_atoms: int
 
@@ -59,6 +63,7 @@ class ValueHead(Head):
 
 class AdvantageHead(Head):
   """Outputs mean-centered advantages for dueling DQN: shape (..., n_actions)."""
+
   n_actions: int
 
   @nn.compact

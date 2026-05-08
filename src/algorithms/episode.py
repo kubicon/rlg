@@ -9,6 +9,7 @@ The returned Rollout stores the full agent_output pytree alongside transitions,
 so the loss function can access whatever fields the agent produces (logits,
 values, embeddings, …) without knowing the network architecture.
 """
+
 from __future__ import annotations
 from typing import NamedTuple, Any
 
@@ -27,36 +28,41 @@ class Episode(NamedTuple):
   agent_output is an agent-specific pytree (e.g. ActorCriticOutput) stacked
   over T and P — the algorithm extracts whatever fields it needs from it.
   """
-  env_states:    Any      # (T,)             — environment states
-  agent_states:  Any      # (T,)             — agent states
-  legal_actions: Any      # (T, P)             — legal actions # Can be extracted from env_states
-  infosets:      Any      # (T, P)             — infosets # Can be extracted from env_state
-  dones:         jax.Array  # (T,)  bool         — True when episode ended
-  rewards:       jax.Array  # (T, P)             — per-player rewards
-  actions:       jax.Array  # (T, P)             — 0-indexed sampled actions
-  agent_output:  Any        # (T, P, ...)        — full agent evaluate output
 
+  env_states: Any  # (T,)             — environment states
+  agent_states: Any  # (T,)             — agent states
+  legal_actions: (
+    Any  # (T, P)             — legal actions # Can be extracted from env_states
+  )
+  infosets: Any  # (T, P)             — infosets # Can be extracted from env_state
+  dones: jax.Array  # (T,)  bool         — True when episode ended
+  rewards: jax.Array  # (T, P)             — per-player rewards
+  actions: jax.Array  # (T, P)             — 0-indexed sampled actions
+  agent_output: Any  # (T, P, ...)        — full agent evaluate output
 
 
 def collect_episodes(
-  env:         Env,
-  agent:       Agent,
-  params:      Any,
-  rng:         Any,
+  env: Env,
+  agent: Agent,
+  params: Any,
+  rng: Any,
   batch_size: int,
-) -> tuple[EnvState, Any, Any, list[Episode]]:
+) -> tuple[EnvState, Any, Any, Episode]:
   """Collect episodes from the environment."""
   rng = jax.random.split(rng, batch_size)
-  return jax.vmap(collect_episode, in_axes=(None, None, None, 0))(env, agent, params, rng)
+  return jax.vmap(collect_episode, in_axes=(None, None, None, 0))(
+    env, agent, params, rng
+  )
+
 
 def collect_episode(
-  env:         Env,
-  agent:       Agent,
-  params:      Any,
-  rng:         Any,
+  env: Env,
+  agent: Agent,
+  params: Any,
+  rng: Any,
   agent_state: Any = None,
-  env_state:   EnvState = None,
-  rollout_len: None |  int = None,
+  env_state: EnvState = None,
+  rollout_len: None | int = None,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect rollout_len steps from env under the current policy.
 
@@ -91,7 +97,7 @@ def collect_episode(
   P = env.num_players
   if rollout_len is None:
     rollout_len = env.max_length
-    
+
   if agent_state is None:
     agent_state = agent.init_state(params)
   if env_state is None:
@@ -102,21 +108,28 @@ def collect_episode(
     env_state, agent_state, rng = carry
     rng, act_key, env_key = jax.random.split(rng, 3)
 
-    infosets = jax.vmap(env.information_set, in_axes=(None, 0))(env_state, jnp.arange(P))
-    legal_actions = jax.vmap(env.legal_actions, in_axes=(None, 0))(env_state, jnp.arange(P))
+    infosets = jax.vmap(env.information_set, in_axes=(None, 0))(
+      env_state, jnp.arange(P)
+    )
+    legal_actions = jax.vmap(env.legal_actions, in_axes=(None, 0))(
+      env_state, jnp.arange(P)
+    )
 
     # Batched forward pass: obs (P, obs_dim) → agent_output with (P, ...) fields
     agent_out, new_agent_state = agent.player_evaluate(params, agent_state, infosets)
 
     logits_masked = jnp.where(legal_actions, agent_out.logits, -jnp.inf)
-    player_keys   = jax.random.split(act_key, P)
-    actions       = jax.vmap(jax.random.categorical)(player_keys, logits_masked) 
+    player_keys = jax.random.split(act_key, P)
+    actions = jax.vmap(jax.random.categorical)(player_keys, logits_masked)
 
     new_env_state, rewards, done, _ = env.apply_action(env_state, actions, env_key)
 
-    step = Episode(env_state, agent_state, legal_actions, infosets, done, rewards, actions, agent_out)
+    step = Episode(
+      env_state, agent_state, legal_actions, infosets, done, rewards, actions, agent_out
+    )
     return (new_env_state, new_agent_state, rng), step
 
   (new_env_state, new_agent_state, new_rng), episode = jax.lax.scan(
-    scan_step, (env_state, agent_state, rng), None, length=rollout_len)
+    scan_step, (env_state, agent_state, rng), None, length=rollout_len
+  )
   return new_env_state, new_agent_state, new_rng, episode

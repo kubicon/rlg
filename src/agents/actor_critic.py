@@ -7,6 +7,7 @@ the caller decides which observation to pass in.
 A more specialised agent (e.g. one with a privileged critic that receives
 state_observation) would override state_evaluate to use a different network.
 """
+
 from __future__ import annotations
 from typing import NamedTuple, Any
 
@@ -22,8 +23,9 @@ class ActorCriticOutput(NamedTuple):
   logits: raw (unmasked) action logits — shape (..., n_actions).
   value:  critic estimate V(s)         — shape (...,).
   """
+
   logits: jax.Array
-  value:  jax.Array
+  value: jax.Array
 
 
 class ActorCriticAgent(Agent):
@@ -54,7 +56,7 @@ class ActorCriticAgent(Agent):
   def _forward(
     self, params: Any, state: Any, obs: Any
   ) -> tuple[ActorCriticOutput, Any]:
-    (logits, value), new_state = self.network.apply({'params': params}, obs, state)
+    (logits, value), new_state = self.network.apply({"params": params}, obs, state)
     return ActorCriticOutput(logits=logits, value=value), new_state
 
   def player_evaluate(

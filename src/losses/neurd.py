@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 
+
 def neurd_loss(
   logits: jax.Array,
   legal_actions: jax.Array,
@@ -14,7 +15,7 @@ def neurd_loss(
   References:
 
   [1] https://arxiv.org/abs/1906.00190
-  """ 
+  """
 
   logits_centered = logits * legal_actions
 

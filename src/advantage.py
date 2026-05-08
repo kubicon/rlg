@@ -3,10 +3,12 @@
 All functions are pure: arrays in, arrays out. Safe to use inside jax.jit,
 jax.vmap, or jax.lax.scan without modification.
 """
+
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+
 
 def compose_affine_transforms(
   transform_i: tuple[jax.Array, jax.Array],
@@ -31,7 +33,7 @@ def vtrace(
   delta_clip: float | jax.Array = 1.0,
   trace_clip: float | jax.Array = 1.0,
 ) -> tuple[jax.Array, jax.Array]:
-  
+
   clipped_delta_ratio = jnp.minimum(delta_clip, importance_sampling)
   clipped_trace_ratio = lambda_ * jnp.minimum(trace_clip, importance_sampling)
 
@@ -47,7 +49,7 @@ def vtrace(
   rev_transform = jax.lax.associative_scan(compose_affine_transforms, rev_transforms)
   rev_advantage, _ = rev_transform
   advantage = rev_advantage[::-1]
-  
+
   target = value + advantage
 
   return target, advantage

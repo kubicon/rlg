@@ -21,6 +21,7 @@ Recurrent agents carry an array-valued state (LSTM cell/hidden, etc.) through
 each evaluate call. For multi-player self-play the caller is responsible for
 managing per-player state if required.
 """
+
 from __future__ import annotations
 import abc
 from typing import Any
@@ -40,9 +41,7 @@ class Agent(abc.ABC):
     """Return the initial recurrent carry (None for stateless agents)."""
 
   @abc.abstractmethod
-  def player_evaluate(
-    self, params: Any, state: Any, obs: Any
-  ) -> tuple[Any, Any]:
+  def player_evaluate(self, params: Any, state: Any, obs: Any) -> tuple[Any, Any]:
     """Forward pass on player-private information.
 
     obs is player_observation or information_set — what exactly one player
@@ -52,9 +51,7 @@ class Agent(abc.ABC):
     """
 
   @abc.abstractmethod
-  def public_evaluate(
-    self, params: Any, state: Any, obs: Any
-  ) -> tuple[Any, Any]:
+  def public_evaluate(self, params: Any, state: Any, obs: Any) -> tuple[Any, Any]:
     """Forward pass on public information.
 
     obs is public_observation or public_state — common knowledge shared by
@@ -64,9 +61,7 @@ class Agent(abc.ABC):
     """
 
   @abc.abstractmethod
-  def state_evaluate(
-    self, params: Any, state: Any, obs: Any
-  ) -> tuple[Any, Any]:
+  def state_evaluate(self, params: Any, state: Any, obs: Any) -> tuple[Any, Any]:
     """Forward pass on privileged ground-truth information.
 
     obs is state_observation or state_representation — the full hidden state,

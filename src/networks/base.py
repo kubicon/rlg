@@ -12,6 +12,7 @@ class Torso(nn.Module):
   Recurrent torsos carry meaningful state (e.g. LSTM (c, h)) between steps.
   The initial state is a learnable parameter: use init_state(params) to obtain it.
   """
+
   feature_dim: int
 
   def __call__(self, x: Any, state: Any) -> tuple[jax.Array, Any]:
@@ -27,7 +28,7 @@ class Torso(nn.Module):
 
   def init_params(self, key: jax.Array, x: Any) -> Any:
     """Initialise all parameters, including any learnable initial state."""
-    return self.init(key, x, self._zero_state())['params']
+    return self.init(key, x, self._zero_state())["params"]
 
 
 class Head(nn.Module):
@@ -37,11 +38,12 @@ class Head(nn.Module):
     raise NotImplementedError
 
   def init_params(self, key: jax.Array, x: jax.Array) -> Any:
-    return self.init(key, x)['params']
+    return self.init(key, x)["params"]
 
 
 class Network(nn.Module):
   """Combines a Torso and a Head: (x, state) -> (output, new_state)."""
+
   torso: Torso
   head: Head
 
@@ -51,7 +53,7 @@ class Network(nn.Module):
 
   def init_state(self, params: Any) -> Any:
     """Return the (learnable) initial state, delegated to the torso."""
-    return self.torso.init_state(params['torso'])
+    return self.torso.init_state(params["torso"])
 
   def init_params(self, key: jax.Array, x: Any) -> Any:
-    return self.init(key, x, self.torso._zero_state())['params']
+    return self.init(key, x, self.torso._zero_state())["params"]

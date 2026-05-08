@@ -14,6 +14,7 @@ class TwinHead(nn.Module):
   outputs from a common representation — actor-critic, value/advantage
   decomposition, multi-task, etc.
   """
+
   torso: Torso
   head1: Head
   head2: Head
@@ -26,10 +27,10 @@ class TwinHead(nn.Module):
     return self.torso._zero_state()
 
   def init_state(self, params: Any) -> Any:
-    return self.torso.init_state(params['torso'])
+    return self.torso.init_state(params["torso"])
 
   def init_params(self, key: jax.Array, x: Any) -> Any:
-    return self.init(key, x, self._zero_state())['params']
+    return self.init(key, x, self._zero_state())["params"]
 
 
 class SeparateTwinHead(nn.Module):
@@ -39,6 +40,7 @@ class SeparateTwinHead(nn.Module):
   should not share any representation — e.g. twin critics in SAC/TD3, or
   actor and critic with entirely different architectures.
   """
+
   torso1: Torso
   head1: Head
   torso2: Torso
@@ -57,9 +59,9 @@ class SeparateTwinHead(nn.Module):
 
   def init_state(self, params: Any) -> tuple[Any, Any]:
     return (
-      self.torso1.init_state(params['torso1']),
-      self.torso2.init_state(params['torso2']),
+      self.torso1.init_state(params["torso1"]),
+      self.torso2.init_state(params["torso2"]),
     )
 
   def init_params(self, key: jax.Array, x: Any) -> Any:
-    return self.init(key, x, self._zero_state())['params']
+    return self.init(key, x, self._zero_state())["params"]

@@ -7,6 +7,7 @@ The Trainer's only responsibilities are:
 
 It has no influence on how training proceeds inside the algorithm.
 """
+
 from __future__ import annotations
 import abc
 from typing import Any
