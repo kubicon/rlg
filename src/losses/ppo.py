@@ -32,10 +32,9 @@ def ppo_loss(
     ent_coef:      float = 0.01,
 ) -> tuple[jax.Array, dict]:
     """PPO loss for a single (timestep, player) sample → scalar."""
-    masked_logits        = jnp.where(legal_actions, logits, -jnp.inf)
-    strategy             = jax.nn.softmax(masked_logits)                   # (A,)
-    log_probs_all        = safe_log_softmax(logits, legal_actions)         # (A,)
-    sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions)  # (A,)
+    strategy= jax.nn.softmax(logits, where=legal_actions)  
+    log_probs_all= safe_log_softmax(logits, legal_actions) 
+    sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions) 
 
     # Log prob of the action actually taken → scalar
     log_prob        = log_probs_all[actions]
