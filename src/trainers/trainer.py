@@ -80,6 +80,7 @@ class StandardTrainer(Trainer):
       self.checkpoint_every = rounded
     else:
       self.checkpoint_every = checkpoint_every
+    self._checkpoint_id = 0
 
   def train(self, state: Any, n_steps: int) -> Any:
     """Run n_steps training iterations.
@@ -107,6 +108,9 @@ class StandardTrainer(Trainer):
       return new_state, metrics
 
     run_chunk = jax.jit(lambda s: jax.lax.scan(scan_fn, s, None, length=chunk))
+
+    if self.checkpoint_every and self.checkpoint_dir:
+      self._save(state)
 
     t0 = time.perf_counter()
     steps_done = 0
@@ -148,8 +152,8 @@ class StandardTrainer(Trainer):
     if self.checkpoint_dir is None:
       return
     os.makedirs(self.checkpoint_dir, exist_ok=True)
-    step = int(state.step)
-    path = os.path.join(self.checkpoint_dir, f"step_{step:08d}.pkl")
+    path = os.path.join(self.checkpoint_dir, f"{self._checkpoint_id}.pkl")
     with open(path, "wb") as f:
       pickle.dump(jax.device_get(state), f)
     print(f"checkpoint saved → {path}")
+    self._checkpoint_id += 1

@@ -132,6 +132,15 @@ class Env(abc.ABC):
     Intended for value functions, debugging, and counterfactual reasoning.
     """
 
+  @property
+  @abc.abstractmethod
+  def max_reward(self) -> float:
+    """Maximum reward achievable by a single player in one episode.
+
+    Used to normalise rewards to [-1, 1] when ``normalize_rewards=True`` is
+    passed to ``collect_episode``.
+    """
+
   def current_player(self, state: EnvState) -> jax.Array:
     """Index of the player to move this step.
 

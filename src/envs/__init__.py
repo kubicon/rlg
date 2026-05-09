@@ -2,11 +2,16 @@ from .base import Env
 from .goofspiel import Goofspiel
 from .leduc_holdem import LeducHoldem
 from .battleship import Battleship
+from .normal_form import NormalFormGame, RockPaperScissors, MatchingPennies, BiasedMatchingPennies
 
 _REGISTRY: dict[str, type] = {
     "goofspiel": Goofspiel,
     "leduc": LeducHoldem,
     "battleship": Battleship,
+    "normal_form": NormalFormGame,
+    "rps": RockPaperScissors,
+    "matching_pennies": MatchingPennies,
+    "biased_matching_pennies": BiasedMatchingPennies,
 }
 
 

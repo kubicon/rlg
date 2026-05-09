@@ -1,10 +1,8 @@
 seed: 0
 
 env:
-  name: goofspiel
-  n_cards: 5
-  prize_order: descending  # random | ascending | descending
-  reward_type: binary       # difference | binary
+  name: leduc
+  reward_type: difference   # binary | difference
 
 algorithm:
   type: mmd
@@ -46,5 +44,5 @@ trainer:
   n_steps: 100000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: data/mmd_goofspiel2
+  checkpoint_dir: data/mmd_leduc
   save_metrics: false

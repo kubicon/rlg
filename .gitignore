@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 data/
+
+# Not ready to commit
+src/tree/cfr.py 

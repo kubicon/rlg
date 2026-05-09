@@ -83,6 +83,12 @@ class Battleship(Env):
     def num_actions(self) -> int:
         return 2 * self.board_size ** 2
 
+    @property
+    def max_reward(self) -> float:
+        if self.reward_type == "binary":
+            return 1.0
+        return float(self.num_ships)
+
     # ── State lifecycle ──────────────────────────────────────────────────────
 
     def init_state(self, key: PRNGKey) -> BattleshipState:

@@ -75,14 +75,15 @@ def register_network(name: str) -> Callable:
 
 
 @register_torso("mlp")
-def _(feature_dim: int = 256, hidden=(256, 256), activation: str = "relu"):
-  from .modules import Activation
+def _(feature_dim: int = 256, hidden=(256, 256), activation: str = "relu", norm: str = "none"):
+  from .modules import Activation, Normalization
   from .torsos import MLPTorso
 
   return MLPTorso(
     feature_dim=feature_dim,
     hidden=tuple(hidden),
     activation=Activation(kind=activation),
+    norm=Normalization(kind=norm),
   )
 
 

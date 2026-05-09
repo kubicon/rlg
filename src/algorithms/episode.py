@@ -47,12 +47,14 @@ def collect_episodes(
   params: Any,
   rng: Any,
   batch_size: int,
+  normalize_rewards: bool = True,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect episodes from the environment."""
   rng = jax.random.split(rng, batch_size)
-  return jax.vmap(collect_episode, in_axes=(None, None, None, 0))(
-    env, agent, params, rng
-  )
+  return jax.vmap(
+    collect_episode,
+    in_axes=(None, None, None, 0, None, None, None, None),
+  )(env, agent, params, rng, None, None, None, normalize_rewards)
 
 
 def collect_episode(
@@ -63,6 +65,7 @@ def collect_episode(
   agent_state: Any = None,
   env_state: EnvState = None,
   rollout_len: None | int = None,
+  normalize_rewards: bool = True,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect rollout_len steps from env under the current policy.
 
@@ -80,13 +83,15 @@ def collect_episode(
   shared recurrent state).
 
   Args:
-    env:         Environment (defines num_players, num_actions, etc.).
-    agent:       Agent whose player_evaluate drives action selection.
-    params:      Current agent parameters.
-    agent_state: Current recurrent carry (None for stateless agents).
-    env_state:   Starting environment state.
-    rng:         PRNG key (threaded through the scan).
-    rollout_len: Number of steps T to collect.
+    env:               Environment (defines num_players, num_actions, etc.).
+    agent:             Agent whose player_evaluate drives action selection.
+    params:            Current agent parameters.
+    agent_state:       Current recurrent carry (None for stateless agents).
+    env_state:         Starting environment state.
+    rng:               PRNG key (threaded through the scan).
+    rollout_len:       Number of steps T to collect.
+    normalize_rewards: If True, divide rewards by ``env.max_reward`` so they
+                       lie in [-1, 1].
 
   Returns:
     new_env_state:   Environment state after the last step (possibly reset).
@@ -123,6 +128,9 @@ def collect_episode(
     actions = jax.vmap(jax.random.categorical)(player_keys, logits_masked)
 
     new_env_state, rewards, done, _ = env.apply_action(env_state, actions, env_key)
+
+    if normalize_rewards:
+      rewards = rewards / env.max_reward
 
     step = Episode(
       env_state, agent_state, legal_actions, infosets, done, rewards, actions, agent_out

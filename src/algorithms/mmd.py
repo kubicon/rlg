@@ -23,14 +23,20 @@ import jax.numpy as jnp
 import jax.lax as lax
 import optax
 
+from ..losses.rnad import rnad_loss
+
 from .base import TrainingState
 from .episode import collect_episodes
 from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
+from enum import StrEnum
 
-
+class LossType(StrEnum):
+  PPO = "ppo"
+  RNAD = "rnad"
+  MMD = "mmd"
 class MMD(PPOBase):
   """PPO with a Polyak target network and a periodically-reset magnet policy.
 
@@ -62,6 +68,10 @@ class MMD(PPOBase):
     old_policy_coef: float = 0.05,
     target_update_rate: float = 0.001,
     magnet_interval: int = 2000,
+    neurd_clip: float = 5.0,
+    neurd_threshold: float = 2.0,
+    loss_type: LossType = LossType.MMD,
+    
   ) -> None:
     super().__init__(
       env,
@@ -81,7 +91,10 @@ class MMD(PPOBase):
     self.old_policy_coef = old_policy_coef
     self.target_update_rate = target_update_rate
     self.magnet_interval = magnet_interval
-
+    self.loss_type = loss_type
+    self.neurd_clip = neurd_clip
+    self.neurd_threshold = neurd_threshold
+    
   # ── Init ──────────────────────────────────────────────────────────────────
 
   def init(self, key: jax.Array) -> TrainingState:
@@ -125,26 +138,49 @@ class MMD(PPOBase):
       def total_loss(params):
         agent_out = self._eval_params(params, episodes)
 
-        _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
-        loss_P = jax.vmap(mmd_loss, in_axes=_axes)
-        loss_TP = jax.vmap(loss_P, in_axes=_axes)
-        loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
-        losses, metrics = loss_BTP(
-          agent_out.value,
-          agent_out.logits,
-          episodes.legal_actions,
-          episodes.actions,
-          episodes.agent_output.logits,  # trajectory sampling policy
-          target_values,  # stable value-loss clipping ref
-          magnet_logits,
-          advantages,
-          targets,
-          self.clip_eps,
-          self.vf_coef,
-          self.ent_coef,
-          self.magnet_coef,
-          self.old_policy_coef,
-        )
+        if self.loss_type == LossType.MMD:
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
+          loss_P = jax.vmap(mmd_loss, in_axes=_axes)
+          loss_TP = jax.vmap(loss_P, in_axes=_axes)
+          loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
+          losses, metrics = loss_BTP(
+            agent_out.value,
+            agent_out.logits,
+            episodes.legal_actions,
+            episodes.actions,
+            episodes.agent_output.logits,  # trajectory sampling policy
+            episodes.agent_output.value, 
+            magnet_logits,
+            advantages,
+            targets,
+            self.clip_eps,
+            self.vf_coef,
+            self.ent_coef,
+            self.magnet_coef,
+            self.old_policy_coef,
+          )
+        elif self.loss_type == LossType.RNAD:
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
+          loss_P = jax.vmap(rnad_loss, in_axes=_axes)
+          loss_TP = jax.vmap(loss_P, in_axes=_axes)
+          loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
+          losses, metrics = loss_BTP(
+            agent_out.value,
+            agent_out.logits,
+            episodes.legal_actions,
+            episodes.actions,
+            episodes.agent_output.logits,  # trajectory sampling policy
+            episodes.agent_output.value, 
+            magnet_logits,
+            advantages,
+            targets,
+            self.clip_eps,
+            self.vf_coef,
+            self.ent_coef,
+            self.magnet_coef,
+            self.neurd_clip,
+            self.neurd_threshold,
+          ) 
         wmean = lambda x: self._wmean(x, valid)
         return wmean(losses), jax.tree.map(wmean, metrics)
 
@@ -173,3 +209,4 @@ class MMD(PPOBase):
       step=state.step + 1,
       extras={"target_params": target_params, "magnet_params": magnet_params},
     ), jax.tree.map(jnp.mean, epoch_metrics)
+   

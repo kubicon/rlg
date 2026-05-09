@@ -89,6 +89,12 @@ class Goofspiel(Env):
   def num_actions(self) -> int:
     return self.n_cards
 
+  @property
+  def max_reward(self) -> float:
+    if self.reward_type == "binary":
+      return 1.0
+    return float(self.n_cards * (self.n_cards + 1) // 2)
+
   # ── State lifecycle ──────────────────────────────────────────────────────
 
   def init_state(self, key: PRNGKey) -> GoofspielState:

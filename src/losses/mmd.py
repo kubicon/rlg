@@ -26,6 +26,9 @@ def mmd_loss(
 
   log_prob = log_probs_all[actions]
   sample_log_prob = sample_log_probs_all[actions]
+  magnet_log_prob = magnet_log_probs_all[actions]
+
+  # advantages = advantages - magnet_coef *( log_prob - magnet_log_prob)
 
   policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantages, clip_eps)
   value_loss = ppo_value_loss(values, sample_values, returns, clip_eps)

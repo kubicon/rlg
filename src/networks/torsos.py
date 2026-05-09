@@ -30,11 +30,14 @@ class MLPTorso(Torso):
 
   hidden: tuple[int, ...]
   activation: Activation = Activation(kind="relu")
+  norm: Normalization = Normalization(kind="none")
 
   @nn.compact
   def __call__(self, x: Any, state: Any) -> tuple[jax.Array, Any]:
     for h in self.hidden:
-      x = self.activation(nn.Dense(h)(x))
+      x = Normalization(kind=self.norm.kind, num_groups=self.norm.num_groups)(
+        self.activation(nn.Dense(h)(x))
+      )
     return nn.Dense(self.feature_dim)(x), state
 
 

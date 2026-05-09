@@ -87,6 +87,12 @@ class LeducHoldem(Env):
     def num_actions(self) -> int:
         return 3  # fold | check/call | bet/raise
 
+    @property
+    def max_reward(self) -> float:
+        if self.reward_type == "binary":
+            return 1.0
+        return float(_MAX_POT)
+
     # ── State lifecycle ──────────────────────────────────────────────────────
 
     def init_state(self, key: PRNGKey) -> LeducState:
@@ -243,10 +249,8 @@ class LeducHoldem(Env):
         Inactive player: only action 0 is legal (ignored dummy)."""
         is_active = jnp.int32(player_id) == state.cur_player
         can_raise = state.raises < _MAX_RAISES
-        active_mask = jnp.concatenate([
-            jnp.array([True, True]),
-            jnp.array([can_raise]),
-        ])
+        can_fold = state.call_amount > 0.0
+        active_mask = jnp.array([can_fold, True, can_raise])
         inactive_mask = jnp.array([True, False, False])
         return jnp.where(is_active, active_mask, inactive_mask)
 

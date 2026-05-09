@@ -125,7 +125,8 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
     state = algorithm.init(key)
     print(f"params: {sum(x.size for x in jax.tree.leaves(state.params)):,}")
     print(f"training for {n_steps} iterations …\n")
-
+  # import chex
+  # with chex.fake_jit():
   state = trainer.train(state, n_steps)
   print(f"\ndone. final step = {int(state.step)}")
 
@@ -134,5 +135,5 @@ if __name__ == "__main__":
   args = sys.argv[1:]
   resume = "--resume" in args
   args = [a for a in args if a != "--resume"]
-  config_path = args[0] if args else "configs/ppo_goofspiel.yaml"
+  config_path = args[0] if args else "configs/mmd_goofspiel.yaml"
   main(config_path, resume=resume)
