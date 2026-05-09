@@ -9,6 +9,8 @@ wheels/
 # Virtual environments
 .venv
 data/
+public_experiments/**/*.pkl
 
 # Not ready to commit
 src/tree/cfr.py 
+
