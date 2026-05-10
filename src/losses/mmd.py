@@ -1,6 +1,6 @@
 from .ppo import ppo_policy_loss, ppo_value_loss, ppo_entropy_loss
 import jax
-from ..utils import softmax, safe_log_softmax, kl_divergence
+from ..utils import safe_log_softmax, kl_divergence
 
 
 def mmd_loss(
@@ -19,7 +19,7 @@ def mmd_loss(
   magnet_coef: float,
   old_policy_coef: float,
 ) -> tuple[jax.Array, dict]:
-  strategy = softmax(logits, legal_actions)  # (A,)
+  strategy = jax.nn.softmax(logits, where=legal_actions)  # (A,)
   log_probs_all = safe_log_softmax(logits, legal_actions)  # (A,)
   sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions)  # (A,)
   magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)  # (A,)
