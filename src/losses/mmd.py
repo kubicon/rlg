@@ -26,7 +26,7 @@ def mmd_loss(
 
   log_prob = log_probs_all[actions]
   sample_log_prob = sample_log_probs_all[actions]
-  magnet_log_prob = magnet_log_probs_all[actions]
+  # magnet_log_prob = magnet_log_probs_all[actions]
 
   # advantages = advantages - magnet_coef *( log_prob - magnet_log_prob)
 

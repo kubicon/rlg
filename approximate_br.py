@@ -17,7 +17,6 @@ Config extension (all existing fields unchanged, plus an optional br section):
 
 from __future__ import annotations
 import pickle
-import sys
 from typing import Any
 
 import jax
@@ -31,10 +30,16 @@ from src.trainers.trainer import StandardTrainer, StdoutLogger
 from train import _fill_env_dims, _save_config
 
 # Keys present in MMD config that BRAlgorithm (PPO-based) does not accept.
-_MMD_ONLY_KEYS = frozenset({
-  "magnet_coef", "old_policy_coef", "magnet_interval",
-  "loss_type", "neurd_clip", "neurd_threshold",
-})
+_MMD_ONLY_KEYS = frozenset(
+  {
+    "magnet_coef",
+    "old_policy_coef",
+    "magnet_interval",
+    "loss_type",
+    "neurd_clip",
+    "neurd_threshold",
+  }
+)
 
 
 def _load_opp_params(path: str) -> Any:
@@ -53,6 +58,7 @@ def main(config_path: str, network_path: str | None, opp_player: int | None) -> 
   br_cfg = cfg.get("br", {})
   network_path = network_path or br_cfg.get("network_path")
   opp_player = opp_player if opp_player is not None else br_cfg.get("player", 0)
+  assert opp_player in (0, 1), "Opponent player must be 0 or 1"
 
   if not network_path:
     raise ValueError("Provide --network or set br.network_path in the config")
@@ -74,7 +80,7 @@ def main(config_path: str, network_path: str | None, opp_player: int | None) -> 
   agent = ActorCriticAgent(network)
 
   opp_params = _load_opp_params(network_path)
-  br_player = (opp_player + 1) % env.num_players
+  br_player = 1 - opp_player
   print(f"opponent loaded from {network_path}  (playing as player {opp_player})")
   print(f"training best response as player {br_player}")
 
@@ -111,9 +117,24 @@ def main(config_path: str, network_path: str | None, opp_player: int | None) -> 
 if __name__ == "__main__":
   import argparse
 
-  p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-  p.add_argument("config", nargs="?", default="configs/mmd_goofspiel.yaml", help="Path to config YAML")
-  p.add_argument("--network", default=None, metavar="PATH", help="Path to opponent checkpoint (.pkl)")
-  p.add_argument("--player", type=int, default=None, metavar="N", help="Player index the opponent plays as (default: 0)")
+  p = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+  )
+  p.add_argument(
+    "config",
+    nargs="?",
+    default="configs/mmd_goofspiel.yaml",
+    help="Path to config YAML",
+  )
+  p.add_argument(
+    "--network", default=None, metavar="PATH", help="Path to opponent checkpoint (.pkl)"
+  )
+  p.add_argument(
+    "--player",
+    type=int,
+    default=None,
+    metavar="N",
+    help="Player index the opponent plays as (default: 0)",
+  )
   args = p.parse_args()
   main(args.config, args.network, args.player)

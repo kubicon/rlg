@@ -1,0 +1,71 @@
+# Sweep spec example for make_configs.py
+#
+# Run with:
+#   python make_configs.py configs/sweep_example.yaml --out-dir configs/sweep_out/
+#
+# This produces 6 configs (3 lr × 2 environments).
+# Sweep values can be scalars OR dicts. Dict values replace the entire
+# sub-tree at that key, which lets each environment carry its own
+# sub-hyperparameters (e.g. n_cards only exists for goofspiel).
+
+sweep:
+  algorithm.lr: [0.0001, 0.001, 0.003]
+  env:
+    - name: leduc
+      reward_type: difference
+    - name: goofspiel
+      n_cards: 5
+      prize_order: descending
+      reward_type: binary
+    - name: batleship
+      board_size: 2
+      ship_lengths:
+      - 2
+      reward_type: binary
+
+seed: 0
+env:
+  name: leduc
+  reward_type: difference
+algorithm:
+  type: mmd
+  n_epochs: 1
+  batch_size: 64
+  lr: 0.0003
+  clip_eps: 0.1
+  vf_coef: 0.5
+  ent_coef: 0.01
+  gamma: 1.0
+  gae_lambda: 0.95
+  delta_clip: 1.0
+  trace_clip: 1.0
+  target_update_rate: 0.001
+  magnet_coef: 0.2
+  old_policy_coef: 0.05
+  magnet_interval: 2000
+  loss_type: rnad
+  neurd_clip: 5.0
+  neurd_threshold: 2.0
+  agent:
+    type: actor_critic
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden:
+        - 128
+        - 128
+        activation: gelu
+        norm: rms
+      head1:
+        type: categorical
+        n_actions: null
+      head2:
+        type: value
+trainer:
+  n_steps: 100000
+  log_every: 2000
+  checkpoint_every: 2000
+  checkpoint_dir: data/sweep_example
+  save_metrics: true

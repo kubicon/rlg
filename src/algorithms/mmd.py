@@ -33,10 +33,13 @@ from ..envs.base import Env
 from ..losses.mmd import mmd_loss
 from enum import StrEnum
 
+
 class LossType(StrEnum):
   PPO = "ppo"
   RNAD = "rnad"
   MMD = "mmd"
+
+
 class MMD(PPOBase):
   """PPO with a Polyak target network and a periodically-reset magnet policy.
 
@@ -71,7 +74,6 @@ class MMD(PPOBase):
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
     loss_type: LossType = LossType.MMD,
-    
   ) -> None:
     super().__init__(
       env,
@@ -94,7 +96,7 @@ class MMD(PPOBase):
     self.loss_type = loss_type
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
-    
+
   # ── Init ──────────────────────────────────────────────────────────────────
 
   def init(self, key: jax.Array) -> TrainingState:
@@ -149,7 +151,7 @@ class MMD(PPOBase):
             episodes.legal_actions,
             episodes.actions,
             episodes.agent_output.logits,  # trajectory sampling policy
-            episodes.agent_output.value, 
+            episodes.agent_output.value,
             magnet_logits,
             advantages,
             targets,
@@ -170,7 +172,7 @@ class MMD(PPOBase):
             episodes.legal_actions,
             episodes.actions,
             episodes.agent_output.logits,  # trajectory sampling policy
-            episodes.agent_output.value, 
+            episodes.agent_output.value,
             magnet_logits,
             advantages,
             targets,
@@ -180,9 +182,9 @@ class MMD(PPOBase):
             self.magnet_coef,
             self.neurd_clip,
             self.neurd_threshold,
-          ) 
+          )
         wmean = lambda x: self._wmean(x, valid)
-        return wmean(losses), jax.tree.map(wmean, metrics)
+        return wmean(losses), jax.tree.map(wmean, metrics)  # type: ignore
 
       (_, metrics), grads = jax.value_and_grad(total_loss, has_aux=True)(params)
       updates, new_opt_state = self.optimizer.update(grads, opt_state, params)
@@ -209,4 +211,3 @@ class MMD(PPOBase):
       step=state.step + 1,
       extras={"target_params": target_params, "magnet_params": magnet_params},
     ), jax.tree.map(jnp.mean, epoch_metrics)
-   

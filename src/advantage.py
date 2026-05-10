@@ -33,7 +33,6 @@ def vtrace(
   delta_clip: float | jax.Array = 1.0,
   trace_clip: float | jax.Array = 1.0,
 ) -> tuple[jax.Array, jax.Array]:
-
   clipped_delta_ratio = jnp.minimum(delta_clip, importance_sampling)
   clipped_trace_ratio = lambda_ * jnp.minimum(trace_clip, importance_sampling)
 

@@ -75,8 +75,14 @@ def collect_episodes_br(
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Convenience wrapper: collect episodes with a fixed opponent policy."""
   return collect_episodes(
-    env, agent, br_params, rng, batch_size, normalize_rewards,
-    opp_params=opp_params, br_player=br_player,
+    env,
+    agent,
+    br_params,
+    rng,
+    batch_size,
+    normalize_rewards,
+    opp_params=opp_params,
+    br_player=br_player,
   )
 
 

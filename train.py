@@ -77,7 +77,9 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
 
   # ── Environment ────────────────────────────────────────────────────────
   env = build_env(cfg["env"])
-  print(f"env: {env.__class__.__name__}  players={env.num_players}  actions={env.num_actions}  max_len={env.max_length}")
+  print(
+    f"env: {env.__class__.__name__}  players={env.num_players}  actions={env.num_actions}  max_len={env.max_length}"
+  )
 
   # ── Agent ──────────────────────────────────────────────────────────────
   alg_cfg = dict(cfg["algorithm"])

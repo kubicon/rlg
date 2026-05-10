@@ -2,37 +2,39 @@ from .base import Env
 from .goofspiel import Goofspiel
 from .leduc_holdem import LeducHoldem
 from .battleship import Battleship
-from .normal_form import NormalFormGame, RockPaperScissors, MatchingPennies, BiasedMatchingPennies
+from .normal_form import (
+  NormalFormGame,
+  RockPaperScissors,
+  MatchingPennies,
+  BiasedMatchingPennies,
+)
 
 _REGISTRY: dict[str, type] = {
-    "goofspiel": Goofspiel,
-    "leduc": LeducHoldem,
-    "battleship": Battleship,
-    "normal_form": NormalFormGame,
-    "rps": RockPaperScissors,
-    "matching_pennies": MatchingPennies,
-    "biased_matching_pennies": BiasedMatchingPennies,
+  "goofspiel": Goofspiel,
+  "leduc": LeducHoldem,
+  "battleship": Battleship,
+  "normal_form": NormalFormGame,
+  "rps": RockPaperScissors,
+  "matching_pennies": MatchingPennies,
+  "biased_matching_pennies": BiasedMatchingPennies,
 }
 
 
 def build_env(cfg: dict) -> Env:
-    """Instantiate an environment from a config dict.
+  """Instantiate an environment from a config dict.
 
-    The dict must contain a ``name`` key matching a registered environment.
-    All remaining keys are passed as keyword arguments to the constructor.
+  The dict must contain a ``name`` key matching a registered environment.
+  All remaining keys are passed as keyword arguments to the constructor.
 
-    Example config::
+  Example config::
 
-        name: goofspiel
-        n_cards: 5
-        prize_order: random
-        reward_type: binary
-    """
-    cfg = dict(cfg)
-    name = cfg.pop("name")
-    if name not in _REGISTRY:
-        raise ValueError(
-            f"Unknown environment '{name}'. "
-            f"Available: {list(_REGISTRY)}"
-        )
-    return _REGISTRY[name](**cfg)
+      name: goofspiel
+      n_cards: 5
+      prize_order: random
+      reward_type: binary
+  """
+  cfg = dict(cfg)
+  name = cfg.pop("name")
+  if name not in _REGISTRY:
+    raise ValueError(f"Unknown environment '{name}'. Available: {list(_REGISTRY)}")
+  return _REGISTRY[name](**cfg)

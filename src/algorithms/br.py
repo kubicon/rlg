@@ -58,8 +58,18 @@ class BRAlgorithm(PPOBase):
     target_update_rate: float = 0.005,
   ) -> None:
     super().__init__(
-      env, agent, n_epochs, batch_size, lr, clip_eps,
-      vf_coef, ent_coef, gamma, gae_lambda, delta_clip, trace_clip,
+      env,
+      agent,
+      n_epochs,
+      batch_size,
+      lr,
+      clip_eps,
+      vf_coef,
+      ent_coef,
+      gamma,
+      gae_lambda,
+      delta_clip,
+      trace_clip,
     )
     self.opp_params = opp_params
     self.br_player = br_player
@@ -84,9 +94,13 @@ class BRAlgorithm(PPOBase):
   def step(self, state: TrainingState) -> tuple[TrainingState, dict[str, jax.Array]]:
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes_br(
-      self.env, self.agent,
-      state.params, self.opp_params, self.br_player,
-      collect_key, self.batch_size,
+      self.env,
+      self.agent,
+      state.params,
+      self.opp_params,
+      self.br_player,
+      collect_key,
+      self.batch_size,
     )
 
     # Target values for br_player only — (B, T)
@@ -107,7 +121,10 @@ class BRAlgorithm(PPOBase):
         agent_out = self._eval_params(params, episodes)
         p = self.br_player
 
-        losses, metrics = jax.vmap(jax.vmap(ppo_loss, in_axes=(0,)*8 + (None,)*3), in_axes=(0,)*8 + (None,)*3)(
+        losses, metrics = jax.vmap(
+          jax.vmap(ppo_loss, in_axes=(0,) * 8 + (None,) * 3),
+          in_axes=(0,) * 8 + (None,) * 3,
+        )(
           agent_out.value[:, :, p],
           agent_out.logits[:, :, p, :],
           episodes.legal_actions[:, :, p, :],
@@ -122,7 +139,9 @@ class BRAlgorithm(PPOBase):
         )
         # weighted mean over T then mean over B — no P axis
         loss = weighted_mean(losses, valid, axis=1).mean()
-        metrics = jax.tree.map(lambda x: weighted_mean(x, valid, axis=1).mean(), metrics)
+        metrics = jax.tree.map(
+          lambda x: weighted_mean(x, valid, axis=1).mean(), metrics
+        )
         return loss, metrics
 
       (_, metrics), grads = jax.value_and_grad(total_loss, has_aux=True)(params)
@@ -152,13 +171,22 @@ class BRAlgorithm(PPOBase):
   def _compute_advantages_1p(
     self,
     rewards: jax.Array,  # (B, T)
-    values: jax.Array,   # (B, T)
-    dones: jax.Array,    # (B, T)
+    values: jax.Array,  # (B, T)
+    dones: jax.Array,  # (B, T)
   ) -> tuple[jax.Array, jax.Array]:
     """vtrace advantage estimation for a single player, returning (B, T) arrays."""
     discount = (1.0 - dones) * self.gamma
     targets, advantages = jax.vmap(
       vtrace,
       in_axes=(0, 0, 0, None, None, None, None, None),
-    )(rewards, values, discount, 1.0, 0.0, self.gae_lambda, self.delta_clip, self.trace_clip)
+    )(
+      rewards,
+      values,
+      discount,
+      1.0,
+      0.0,
+      self.gae_lambda,
+      self.delta_clip,
+      self.trace_clip,
+    )
     return advantages, targets
