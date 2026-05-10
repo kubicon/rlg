@@ -59,7 +59,7 @@ class NormalFormGame(Env):
 
     @property
     def max_reward(self) -> float:
-        return float(jnp.max(self._matrix))
+        return jnp.max(self._matrix)
 
     # ── State lifecycle ──────────────────────────────────────────────────────
 

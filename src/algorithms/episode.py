@@ -48,13 +48,36 @@ def collect_episodes(
   rng: Any,
   batch_size: int,
   normalize_rewards: bool = True,
+  opp_params: Any = None,
+  br_player: int | None = None,
 ) -> tuple[EnvState, Any, Any, Episode]:
-  """Collect episodes from the environment."""
+  """Collect a batch of episodes from the environment.
+
+  When opp_params and br_player are given, params is used only for br_player
+  and opp_params drives all other players (best-response mode).
+  """
   rng = jax.random.split(rng, batch_size)
   return jax.vmap(
     collect_episode,
-    in_axes=(None, None, None, 0, None, None, None, None),
-  )(env, agent, params, rng, None, None, None, normalize_rewards)
+    in_axes=(None, None, None, 0, None, None, None, None, None, None),
+  )(env, agent, params, rng, None, None, None, normalize_rewards, opp_params, br_player)
+
+
+def collect_episodes_br(
+  env: Env,
+  agent: Agent,
+  br_params: Any,
+  opp_params: Any,
+  br_player: int,
+  rng: Any,
+  batch_size: int,
+  normalize_rewards: bool = True,
+) -> tuple[EnvState, Any, Any, Episode]:
+  """Convenience wrapper: collect episodes with a fixed opponent policy."""
+  return collect_episodes(
+    env, agent, br_params, rng, batch_size, normalize_rewards,
+    opp_params=opp_params, br_player=br_player,
+  )
 
 
 def collect_episode(
@@ -66,6 +89,8 @@ def collect_episode(
   env_state: EnvState = None,
   rollout_len: None | int = None,
   normalize_rewards: bool = True,
+  opp_params: Any = None,
+  br_player: int | None = None,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect rollout_len steps from env under the current policy.
 
@@ -76,6 +101,11 @@ def collect_episode(
     3. Applies legal-action masking, samples actions, records log-probs.
     4. Steps the env; auto-resets on episode end.
 
+  When opp_params and br_player are provided the episode is collected in
+  best-response mode: params drives br_player, opp_params drives all others.
+  agent_output in the returned Episode always reflects params (br_player's
+  network), so the BR algorithm can read its slice without special-casing.
+
   For stateless agents pass agent_state=None; it is carried through unchanged.
   For recurrent agents the updated state is returned and threaded into the
   next step — each step processes all P players in one batched forward pass,
@@ -85,13 +115,16 @@ def collect_episode(
   Args:
     env:               Environment (defines num_players, num_actions, etc.).
     agent:             Agent whose player_evaluate drives action selection.
-    params:            Current agent parameters.
+    params:            Current agent parameters (or br_params in BR mode).
+    rng:               PRNG key (threaded through the scan).
     agent_state:       Current recurrent carry (None for stateless agents).
     env_state:         Starting environment state.
-    rng:               PRNG key (threaded through the scan).
     rollout_len:       Number of steps T to collect.
     normalize_rewards: If True, divide rewards by ``env.max_reward`` so they
                        lie in [-1, 1].
+    opp_params:        Fixed opponent parameters. When set, br_player must
+                       also be provided.
+    br_player:         Player index trained by params; all others use opp_params.
 
   Returns:
     new_env_state:   Environment state after the last step (possibly reset).
@@ -123,7 +156,14 @@ def collect_episode(
     # Batched forward pass: obs (P, obs_dim) → agent_output with (P, ...) fields
     agent_out, new_agent_state = agent.player_evaluate(params, agent_state, infosets)
 
-    logits_masked = jnp.where(legal_actions, agent_out.logits, -jnp.inf)
+    if opp_params is None:
+      logits_masked = jnp.where(legal_actions, agent_out.logits, -jnp.inf)
+    else:
+      opp_out, _ = agent.player_evaluate(opp_params, agent_state, infosets)
+      is_br = jnp.arange(P) == br_player
+      mixed_logits = jnp.where(is_br[:, None], agent_out.logits, opp_out.logits)
+      logits_masked = jnp.where(legal_actions, mixed_logits, -jnp.inf)
+
     player_keys = jax.random.split(act_key, P)
     actions = jax.vmap(jax.random.categorical)(player_keys, logits_masked)
 
