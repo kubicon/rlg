@@ -16,7 +16,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import jax.lax as lax
-from ..utils import safe_log_softmax
+from ..utils import softmax, safe_log_softmax
 
 
 def ppo_loss(
@@ -33,7 +33,7 @@ def ppo_loss(
   ent_coef: float = 0.01,
 ) -> tuple[jax.Array, dict]:
   """PPO loss for a single (timestep, player) sample → scalar."""
-  strategy = jax.nn.softmax(logits, where=legal_actions)
+  strategy = softmax(logits, legal_actions)
   log_probs_all = safe_log_softmax(logits, legal_actions)
   sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions)
 

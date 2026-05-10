@@ -2,7 +2,7 @@ from ..losses.neurd import neurd_loss
 from .ppo import ppo_value_loss, ppo_entropy_loss
 import jax
 import jax.numpy as jnp
-from ..utils import safe_log_softmax
+from ..utils import softmax, safe_log_softmax
 
 
 def rnad_regularization(
@@ -45,9 +45,9 @@ def rnad_loss(
   neurd_threshold: float,
 ) -> tuple[jax.Array, dict]:
   log_probs_all = safe_log_softmax(logits, legal_actions)
-  strategy = jax.nn.softmax(logits, where=legal_actions)
+  strategy = softmax(logits, legal_actions)
   magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
-  sampling_strategy = jax.nn.softmax(sample_logits, where=legal_actions)
+  sampling_strategy = softmax(sample_logits, legal_actions)
 
   regularized_value = values - rnad_regularization(
     log_probs_all, magnet_log_probs_all, magnet_coef
