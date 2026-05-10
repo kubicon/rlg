@@ -73,14 +73,20 @@ def _combo_suffix(sweep_keys: list[str], combo: tuple) -> str:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-def generate(spec_path: Path, out_dir: Path) -> list[Path]:
+def _config_out_path(config: dict, fallback_dir: Path, suffix: str) -> Path:
+  if "trainer" in config and "checkpoint_dir" in config["trainer"]:
+    return Path(config["trainer"]["checkpoint_dir"]) / "config.yaml"
+  return fallback_dir / f"config_{suffix}.yaml"
+
+
+def generate(spec_path: Path, fallback_dir: Path) -> list[Path]:
   with open(spec_path) as f:
     spec = yaml.safe_load(f)
 
   sweep_spec: dict = spec.pop("sweep", {})
 
   if not sweep_spec:
-    out_path = out_dir / "config.yaml"
+    out_path = _config_out_path(spec, fallback_dir, "")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
       yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
@@ -89,7 +95,6 @@ def generate(spec_path: Path, out_dir: Path) -> list[Path]:
   sweep_keys = list(sweep_spec.keys())
   sweep_values = [sweep_spec[k] for k in sweep_keys]
 
-  out_dir.mkdir(parents=True, exist_ok=True)
   written: list[Path] = []
   for combo in itertools.product(*sweep_values):
     overrides = dict(zip(sweep_keys, combo))
@@ -97,7 +102,8 @@ def generate(spec_path: Path, out_dir: Path) -> list[Path]:
     suffix = _combo_suffix(sweep_keys, combo)
     if "trainer" in config and "checkpoint_dir" in config["trainer"]:
       config["trainer"]["checkpoint_dir"] += f"/{suffix}"
-    out_path = out_dir / f"config_{suffix}.yaml"
+    out_path = _config_out_path(config, fallback_dir, suffix)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
       yaml.dump(config, f, default_flow_style=False, sort_keys=False)
     written.append(out_path)
@@ -124,16 +130,16 @@ def main() -> None:
   parser.add_argument(
     "--runner",
     type=str,
-    default="train.py",
+    default="train_and_eval.py",
     help="Script to run each config with (default: train.py)",
   )
   args = parser.parse_args()
 
-  out_dir = args.out_dir if args.out_dir is not None else args.spec.parent
-  written = generate(args.spec, out_dir)
-  print(f"Wrote {len(written)} config(s) to {out_dir}/")
+  fallback_dir = args.out_dir if args.out_dir is not None else args.spec.parent
+  written = generate(args.spec, fallback_dir)
+  print(f"Wrote {len(written)} config(s):")
   for p in written:
-    print(f"  {p.name}")
+    print(f"  {p}")
 
   if args.run_experiments:
     print()

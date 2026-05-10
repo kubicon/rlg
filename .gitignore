@@ -14,3 +14,4 @@ public_experiments/**/*.pkl
 # Not ready to commit
 src/tree/cfr.py 
 
+plots/

@@ -9,7 +9,8 @@
 # sub-hyperparameters (e.g. n_cards only exists for goofspiel).
 
 sweep:
-  algorithm.lr: [0.0001, 0.001, 0.003]
+  algorithm.magnet_coef: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5]
+  algorithm.loss_type: [rnad, mmd]
   env:
     - name: leduc
       reward_type: difference
@@ -34,7 +35,7 @@ algorithm:
   lr: 0.0003
   clip_eps: 0.1
   vf_coef: 0.5
-  ent_coef: 0.01
+  ent_coef: 0.03
   gamma: 1.0
   gae_lambda: 0.95
   delta_clip: 1.0
@@ -45,7 +46,7 @@ algorithm:
   magnet_interval: 2000
   loss_type: rnad
   neurd_clip: 5.0
-  neurd_threshold: 2.0
+  neurd_threshold: 3.0
   agent:
     type: actor_critic
     network:
@@ -64,8 +65,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 100000
+  n_steps: 50000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: data/sweep_example
+  checkpoint_dir: public_experiments/magnet_strength
   save_metrics: true
