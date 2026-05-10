@@ -1,5 +1,5 @@
 """
-Generate config files from a sweep spec.
+Generate config files from a sweep spec, and optionally run them.
 
 The spec is a normal YAML config with an optional top-level `sweep:` block:
 
@@ -19,11 +19,14 @@ lists.  With no `sweep:` block the input is copied as-is (one output file).
 
 Usage:
     python make_configs.py <spec.yaml> [--out-dir <dir>]
+    python make_configs.py <spec.yaml> --run-experiments [--runner train.py]
 """
 
 import argparse
 import copy
 import itertools
+import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -113,6 +116,17 @@ def main() -> None:
     default=None,
     help="Output directory (default: same dir as spec)",
   )
+  parser.add_argument(
+    "--run-experiments",
+    action="store_true",
+    help="Run each generated config sequentially after writing all files",
+  )
+  parser.add_argument(
+    "--runner",
+    type=str,
+    default="train.py",
+    help="Script to run each config with (default: train.py)",
+  )
   args = parser.parse_args()
 
   out_dir = args.out_dir if args.out_dir is not None else args.spec.parent
@@ -120,6 +134,15 @@ def main() -> None:
   print(f"Wrote {len(written)} config(s) to {out_dir}/")
   for p in written:
     print(f"  {p.name}")
+
+  if args.run_experiments:
+    print()
+    for i, config_path in enumerate(written, 1):
+      print(f"[{i}/{len(written)}] Running {config_path.name} ...")
+      result = subprocess.run([sys.executable, args.runner, str(config_path)])
+      if result.returncode != 0:
+        print(f"  FAILED (exit code {result.returncode}), stopping.")
+        sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
