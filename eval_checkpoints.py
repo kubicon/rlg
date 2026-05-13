@@ -19,7 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 import yaml
 
-from src.envs import build_env
+from src.envs import build_env, NoisyEnv
 from src.networks.configs import build_network
 from src.agents.actor_critic import ActorCriticAgent
 from src.tree import (
@@ -136,7 +136,11 @@ def main(checkpoint_dir: str) -> None:
 
   # ── Build env and agent ───────────────────────────────────────────────
   env = build_env(cfg["env"])
-  print(f"env: {env.__class__.__name__}  actions={env.num_actions}")
+  if isinstance(env, NoisyEnv):
+    env = env._env
+    print(f"env: NoisyEnv unwrapped → {env.__class__.__name__}  actions={env.num_actions}")
+  else:
+    print(f"env: {env.__class__.__name__}  actions={env.num_actions}")
 
   alg_cfg = dict(cfg["algorithm"])
   agent_cfg = alg_cfg.pop("agent")
