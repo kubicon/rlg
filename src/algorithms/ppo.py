@@ -70,7 +70,7 @@ class PPOBase(Algorithm):
   def _init_common(self, key: jax.Array):
     key, env_key, net_key = jax.random.split(key, 3)
     env_state = self.env.init_state(env_key)
-    dummy_obs = self.env.information_set(env_state, 0)
+    dummy_obs = self.env.information_set(env_state, 0, key)
     params = self.agent.init_params(net_key, dummy_obs)
     opt_state = self.optimizer.init(params)
     agent_state = self.agent.init_state(params)

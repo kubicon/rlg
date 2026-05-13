@@ -150,10 +150,11 @@ def collect_episode(
 
   def scan_step(carry, _):
     env_state, agent_state, rng = carry
-    rng, act_key, env_key = jax.random.split(rng, 3)
+    rng, act_key, env_key, obs_key = jax.random.split(rng, 4)
+    obs_keys = jax.random.split(obs_key, P)
 
-    infosets = jax.vmap(env.information_set, in_axes=(None, 0))(
-      env_state, jnp.arange(P)
+    infosets = jax.vmap(env.information_set, in_axes=(None, 0, 0))(
+      env_state, jnp.arange(P), obs_keys
     )
     legal_actions = jax.vmap(env.legal_actions, in_axes=(None, 0))(
       env_state, jnp.arange(P)

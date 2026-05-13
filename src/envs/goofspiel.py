@@ -206,7 +206,7 @@ class Goofspiel(Env):
   # ── Observations ─────────────────────────────────────────────────────────
 
   def player_observation(
-    self, state: GoofspielState, player_id: jax.Array
+    self, state: GoofspielState, player_id: jax.Array, key: PRNGKey
   ) -> jax.Array:
     """Binary vector of length 5*n_cards.
 
@@ -220,7 +220,7 @@ class Goofspiel(Env):
       [hand, self._prize_shown_bits(state), self._turn_result_bits(state)]
     )
 
-  def public_observation(self, state: GoofspielState) -> jax.Array:
+  def public_observation(self, state: GoofspielState, key: PRNGKey) -> jax.Array:
     """Binary vector of length 4*n_cards.
 
     Layout: prize_shown (n_cards) | turn_results (3*n_cards)
@@ -229,7 +229,7 @@ class Goofspiel(Env):
       [self._prize_shown_bits(state), self._turn_result_bits(state)]
     )
 
-  def state_observation(self, state: GoofspielState) -> jax.Array:
+  def state_observation(self, state: GoofspielState, key: PRNGKey) -> jax.Array:
     """Binary vector of length n_cards**2 + 5*n_cards that uniquely identifies the state.
 
     Layout: prize_deck_onehot (n_cards**2) | hand0 (n_cards) | hand1 (n_cards)
@@ -266,7 +266,7 @@ class Goofspiel(Env):
     return jax.nn.one_hot(state.prize_deck - 1, self.n_cards) * prize_shown[:, None]
 
   def information_set(
-    self, state: GoofspielState, player_id: jax.Array | int
+    self, state: GoofspielState, player_id: jax.Array | int, key: PRNGKey
   ) -> jax.Array:
     """Ordered action history from player_id's perspective.
 
@@ -290,7 +290,7 @@ class Goofspiel(Env):
       ]
     )
 
-  def public_state(self, state: GoofspielState) -> jax.Array:
+  def public_state(self, state: GoofspielState, key: PRNGKey) -> jax.Array:
     """Ordered history of all public events.
 
     Shape: (2*n_cards**2 + 3*n_cards,).
@@ -312,7 +312,7 @@ class Goofspiel(Env):
       ]
     )
 
-  def state_representation(self, state: GoofspielState) -> jax.Array:
+  def state_representation(self, state: GoofspielState, key: PRNGKey) -> jax.Array:
     """Full ground-truth game trajectory (privileged — not available to agents).
 
     Shape: (3*n_cards**2 + 3*n_cards,).

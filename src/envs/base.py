@@ -72,22 +72,31 @@ class Env(abc.ABC):
   # ── Observations ────────────────────────────────────────────────────────
 
   @abc.abstractmethod
-  def player_observation(self, state: EnvState, player_id: jax.Array) -> Observation:
+  def player_observation(
+    self, state: EnvState, player_id: jax.Array, key: PRNGKey
+  ) -> Observation:
     """Private observation for player_id (what only that player can see).
 
+    key is a PRNGKey consumed by wrappers that inject observation noise;
+    pass any valid key when noise is not needed.
+
     player_id is a JAX scalar so this can be vmapped across all players:
-      obs = jax.vmap(lambda p: env.player_observation(state, p))(
+      obs = jax.vmap(lambda p: env.player_observation(state, p, key))(
                 jnp.arange(env.num_players))
     """
 
   @abc.abstractmethod
-  def public_observation(self, state: EnvState) -> Observation:
-    """Observation available to every player (common knowledge)."""
+  def public_observation(self, state: EnvState, key: PRNGKey) -> Observation:
+    """Observation available to every player (common knowledge).
+
+    key is a PRNGKey consumed by wrappers that inject observation noise.
+    """
 
   @abc.abstractmethod
-  def state_observation(self, state: EnvState) -> Observation:
+  def state_observation(self, state: EnvState, key: PRNGKey) -> Observation:
     """Full ground-truth state — uniquely identifies the underlying game state.
 
+    key is a PRNGKey consumed by wrappers that inject observation noise.
     Not available to agents during play. Intended for value functions with
     privileged information (e.g. opponent hand in card games) or debugging.
     """
@@ -106,8 +115,13 @@ class Env(abc.ABC):
   # ── Perfect-recall representations ──────────────────────────────────────
 
   @abc.abstractmethod
-  def information_set(self, state: EnvState, player_id: jax.Array | int) -> Observation:
+  def information_set(
+    self, state: EnvState, player_id: jax.Array | int, key: PRNGKey
+  ) -> Observation:
     """Ordered history of everything player_id has observed and done.
+
+    key is a PRNGKey consumed by wrappers that inject observation noise;
+    pass any valid key when noise is not needed.
 
     Unlike player_observation (a snapshot), this encodes the full sequence of
     past actions and observations — the information set in the game-theoretic
@@ -116,18 +130,20 @@ class Env(abc.ABC):
     """
 
   @abc.abstractmethod
-  def public_state(self, state: EnvState) -> Observation:
+  def public_state(self, state: EnvState, key: PRNGKey) -> Observation:
     """Ordered history of all public information so far.
 
+    key is a PRNGKey consumed by wrappers that inject observation noise.
     Unlike public_observation (a snapshot), this preserves the sequence of
     public events — prize cards, results, and any information revealed by the
     resolution of each turn (e.g. cards played in a draw).
     """
 
   @abc.abstractmethod
-  def state_representation(self, state: EnvState) -> Observation:
+  def state_representation(self, state: EnvState, key: PRNGKey) -> Observation:
     """Ordered history of the full ground-truth game trajectory.
 
+    key is a PRNGKey consumed by wrappers that inject observation noise.
     Uniquely identifies the entire history, including all hidden actions.
     Intended for value functions, debugging, and counterfactual reasoning.
     """

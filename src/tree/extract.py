@@ -45,8 +45,8 @@ def _make_vm_tree_obs(env: Env):
       env.current_player(state),
       env.legal_actions(state, jnp.int32(0)),
       env.legal_actions(state, jnp.int32(1)),
-      env.information_set(state, jnp.int32(0)),
-      env.information_set(state, jnp.int32(1)),
+      env.information_set(state, jnp.int32(0), jax.random.key(0)),
+      env.information_set(state, jnp.int32(1), jax.random.key(0)),
     )
 
   return jax.jit(jax.vmap(row))

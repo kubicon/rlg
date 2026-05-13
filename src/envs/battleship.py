@@ -287,7 +287,7 @@ class Battleship(Env):
   # ── Observations ────────────────────────────────────────────────────────
 
   def player_observation(
-    self, state: BattleshipState, player_id: jax.Array
+    self, state: BattleshipState, player_id: jax.Array, key: PRNGKey
   ) -> jax.Array:
     """4*N²+2+S float32: own ships, hits/misses on opp, shots on me, phase, placed frac, alive."""
     p = jnp.int32(player_id)
@@ -309,7 +309,7 @@ class Battleship(Env):
       [own_ships, opp_hits, opp_misses, shots_on_me, phase, placed_frac, alive]
     )
 
-  def public_observation(self, state: BattleshipState) -> jax.Array:
+  def public_observation(self, state: BattleshipState, key: PRNGKey) -> jax.Array:
     """4*N²+1 float32: both players' hit/miss grids and current phase."""
     p0_hits = (
       (state.shot_grids[0] & (state.ship_grids[1] > 0)).astype(jnp.float32).flatten()
@@ -326,7 +326,7 @@ class Battleship(Env):
     phase = jnp.array([state.phase], dtype=jnp.float32)
     return jnp.concatenate([p0_hits, p0_miss, p1_hits, p1_miss, phase])
 
-  def state_observation(self, state: BattleshipState) -> jax.Array:
+  def state_observation(self, state: BattleshipState, key: PRNGKey) -> jax.Array:
     """6*N²+1 float32: both ship layouts, both hit/miss grids, phase."""
     p0_ships = (state.ship_grids[0] > 0).astype(jnp.float32).flatten()
     p1_ships = (state.ship_grids[1] > 0).astype(jnp.float32).flatten()
@@ -372,12 +372,12 @@ class Battleship(Env):
   # Board history is fully captured by ship_grids and shot_grids.
 
   def information_set(
-    self, state: BattleshipState, player_id: jax.Array | int
+    self, state: BattleshipState, player_id: jax.Array | int, key: PRNGKey
   ) -> jax.Array:
-    return self.player_observation(state, jnp.int32(player_id))
+    return self.player_observation(state, jnp.int32(player_id), key)
 
-  def public_state(self, state: BattleshipState) -> jax.Array:
-    return self.public_observation(state)
+  def public_state(self, state: BattleshipState, key: PRNGKey) -> jax.Array:
+    return self.public_observation(state, key)
 
-  def state_representation(self, state: BattleshipState) -> jax.Array:
-    return self.state_observation(state)
+  def state_representation(self, state: BattleshipState, key: PRNGKey) -> jax.Array:
+    return self.state_observation(state, key)

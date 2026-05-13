@@ -238,16 +238,18 @@ class LeducHoldem(Env):
 
   # ── Observations ────────────────────────────────────────────────────────
 
-  def player_observation(self, state: LeducState, player_id: jax.Array) -> jax.Array:
+  def player_observation(
+    self, state: LeducState, player_id: jax.Array, key: PRNGKey
+  ) -> jax.Array:
     """39-dim: own_card_onehot(3) + common(36)."""
     own_card = jax.nn.one_hot(state.private_cards[player_id], 3, dtype=jnp.float32)
     return jnp.concatenate([own_card, self._common_bits(state)])
 
-  def public_observation(self, state: LeducState) -> jax.Array:
+  def public_observation(self, state: LeducState, key: PRNGKey) -> jax.Array:
     """36-dim: common public information only."""
     return self._common_bits(state)
 
-  def state_observation(self, state: LeducState) -> jax.Array:
+  def state_observation(self, state: LeducState, key: PRNGKey) -> jax.Array:
     """45-dim: both private cards + pending public card + common(36)."""
     card0 = jax.nn.one_hot(state.private_cards[0], 3, dtype=jnp.float32)
     card1 = jax.nn.one_hot(state.private_cards[1], 3, dtype=jnp.float32)
@@ -273,11 +275,13 @@ class LeducHoldem(Env):
   # The full action history is embedded in every observation vector, so these
   # are identical to the snapshot observations.
 
-  def information_set(self, state: LeducState, player_id: jax.Array | int) -> jax.Array:
-    return self.player_observation(state, jnp.int32(player_id))
+  def information_set(
+    self, state: LeducState, player_id: jax.Array | int, key: PRNGKey
+  ) -> jax.Array:
+    return self.player_observation(state, jnp.int32(player_id), key)
 
-  def public_state(self, state: LeducState) -> jax.Array:
-    return self.public_observation(state)
+  def public_state(self, state: LeducState, key: PRNGKey) -> jax.Array:
+    return self.public_observation(state, key)
 
-  def state_representation(self, state: LeducState) -> jax.Array:
-    return self.state_observation(state)
+  def state_representation(self, state: LeducState, key: PRNGKey) -> jax.Array:
+    return self.state_observation(state, key)

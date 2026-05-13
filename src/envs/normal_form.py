@@ -80,14 +80,14 @@ class NormalFormGame(Env):
   # ── Observations ────────────────────────────────────────────────────────
 
   def player_observation(
-    self, state: NormalFormState, player_id: jax.Array
+    self, state: NormalFormState, player_id: jax.Array, key: PRNGKey
   ) -> jax.Array:
     return jax.nn.one_hot(player_id, self.num_players, dtype=jnp.float32)
 
-  def public_observation(self, state: NormalFormState) -> jax.Array:
+  def public_observation(self, state: NormalFormState, key: PRNGKey) -> jax.Array:
     return jnp.zeros(1, dtype=jnp.float32)
 
-  def state_observation(self, state: NormalFormState) -> jax.Array:
+  def state_observation(self, state: NormalFormState, key: PRNGKey) -> jax.Array:
     return jnp.zeros(1, dtype=jnp.float32)
 
   # ── Action legality & turn order ────────────────────────────────────────
@@ -100,15 +100,15 @@ class NormalFormGame(Env):
   # ── Perfect-recall representations ──────────────────────────────────────
 
   def information_set(
-    self, state: NormalFormState, player_id: jax.Array | int
+    self, state: NormalFormState, player_id: jax.Array | int, key: PRNGKey
   ) -> jax.Array:
-    return self.player_observation(state, jnp.int32(player_id))
+    return self.player_observation(state, jnp.int32(player_id), key)
 
-  def public_state(self, state: NormalFormState) -> jax.Array:
-    return self.public_observation(state)
+  def public_state(self, state: NormalFormState, key: PRNGKey) -> jax.Array:
+    return self.public_observation(state, key)
 
-  def state_representation(self, state: NormalFormState) -> jax.Array:
-    return self.state_observation(state)
+  def state_representation(self, state: NormalFormState, key: PRNGKey) -> jax.Array:
+    return self.state_observation(state, key)
 
 
 # ── Concrete games ────────────────────────────────────────────────────────────

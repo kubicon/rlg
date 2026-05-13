@@ -62,7 +62,7 @@ def _collect_player_infosets(
 
     # Batch observation extraction for the whole layer at once.
     obs_all = np.asarray(
-      jax.vmap(lambda s: env.information_set(s, jnp.int32(player)))(lay.state_batch)
+      jax.vmap(lambda s: env.information_set(s, jnp.int32(player), jax.random.key(0)))(lay.state_batch)
     )
 
     for i in range(lay.n_nodes):
@@ -158,7 +158,7 @@ def main(checkpoint_dir: str) -> None:
 
   apply_fn = _build_apply_fn(network)
   # Warm up JIT with dummy params from a throw-away init.
-  dummy_key = jax.random.PRNGKey(0)
+  dummy_key = jax.random.key(0)
   dummy_obs = obs0[:1] if len(obs0) > 0 else obs1[:1]
   dummy_params = agent.init_params(dummy_key, dummy_obs[0])
   _ = apply_fn(dummy_params, dummy_obs)
@@ -174,9 +174,9 @@ def main(checkpoint_dir: str) -> None:
 
   print(f"{'ckpt':>6}  {'step':>8}  {'br_p0':>9}  {'br_p1':>9}  {'nashconv':>10}")
   print("-" * 52)
-  init_state = env.init_state(jax.random.PRNGKey(0))
-  init_iset0 = np.asarray(env.information_set(init_state, jnp.int32(0))).tobytes()
-  init_iset1 = np.asarray(env.information_set(init_state, jnp.int32(1))).tobytes()
+  init_state = env.init_state(jax.random.key(0))
+  init_iset0 = np.asarray(env.information_set(init_state, jnp.int32(0), jax.random.key(0))).tobytes()
+  init_iset1 = np.asarray(env.information_set(init_state, jnp.int32(1), jax.random.key(0))).tobytes()
   results: list[dict] = []
   for path in paths:
     ckpt_id = int(os.path.splitext(os.path.basename(path))[0])
