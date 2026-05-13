@@ -64,8 +64,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 100000
+  n_steps: 200000
   log_every: 2000
-  checkpoint_every: 10000
+  checkpoint_every: 2000
   checkpoint_dir: data/obs_noise_sweep
   save_metrics: true
