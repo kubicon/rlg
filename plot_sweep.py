@@ -61,6 +61,13 @@ def _out_filename(group_keys: dict[str, str]) -> str:
   return "_".join(f"{k}={v}" for k, v in group_keys.items()) + ".png"
 
 
+def _lighten_color(color, amount: float = 0.35):
+  """Blend *color* toward white by *amount* (0 = unchanged, 1 = white)."""
+  import matplotlib.colors as mc
+  c = np.array(mc.to_rgb(color))
+  return tuple(1.0 - amount * (1.0 - c))
+
+
 def plot_sweep(exp_dir: Path, curve_key: str, metric: str, out_dir: Path) -> None:
   subdirs = [d for d in sorted(exp_dir.iterdir()) if d.is_dir()]
 
@@ -84,27 +91,44 @@ def plot_sweep(exp_dir: Path, curve_key: str, metric: str, out_dir: Path) -> Non
     print("No valid runs found.")
     return
 
-  # group by all keys except curve_key, preserving insertion order
-  groups: dict[tuple, list] = {}
+  # when seed is a sweep param, aggregate over it instead of splitting curves
+  has_seed = any("seed" in params for params, _, _ in runs)
+  seed_is_curve = has_seed and curve_key == "seed"
+  exclude_from_group = {curve_key} | ({"seed"} if has_seed else set())
+
+  # group_key -> curve_label -> [(steps, values), ...]
+  groups: dict[tuple, dict[str, list]] = {}
   for params, steps, values in runs:
-    group_key = tuple((k, v) for k, v in params.items() if k != curve_key)
-    groups.setdefault(group_key, []).append((params[curve_key], steps, values))
+    group_key = tuple((k, v) for k, v in params.items() if k not in exclude_from_group)
+    cv = "_" if seed_is_curve else params[curve_key]
+    groups.setdefault(group_key, {}).setdefault(cv, []).append((steps, values))
 
   out_dir.mkdir(parents=True, exist_ok=True)
 
-  for group_key, curves in groups.items():
+  for group_key, curve_map in groups.items():
     group_dict = dict(group_key)
-    # sort curves by numeric value of curve_key where possible
-    curves.sort(key=lambda x: _try_numeric(x[0]))
+    sorted_curves = sorted(curve_map.items(), key=lambda x: _try_numeric(x[0]))
 
     fig, ax = plt.subplots(figsize=(7, 4))
-    for label, steps, values in curves:
-      ax.plot(steps, values, linewidth=1.5, label=f"{curve_key}={label}")
+    for label, seed_runs in sorted_curves:
+      all_values = np.stack([v for _, v in seed_runs])
+      steps = seed_runs[0][0]
+      plot_label = None if seed_is_curve else f"{curve_key}={label}"
+
+      if has_seed and len(seed_runs) > 1:
+        mean = np.mean(all_values, axis=0)
+        sem = np.std(all_values, axis=0, ddof=1) / np.sqrt(len(seed_runs))
+        ci = 1.96 * sem
+        (line,) = ax.plot(steps, mean, linewidth=1.5, label=plot_label)
+        ax.fill_between(steps, mean - ci, mean + ci, color=_lighten_color(line.get_color()))
+      else:
+        ax.plot(steps, all_values[0], linewidth=1.5, label=plot_label)
 
     ax.set_xlabel("Step")
     ax.set_ylabel(metric)
     ax.set_title(_figure_title(group_dict))
-    ax.legend()
+    if not seed_is_curve:
+      ax.legend()
     fig.tight_layout()
 
     out_path = out_dir / _out_filename(group_dict)
