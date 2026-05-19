@@ -37,8 +37,8 @@ Observation sizes (float32); A = m·n:
                                    | attempted_p0(A) | attempted_p1(A) | cur_player(1)
     information_set    : 2·A + 1   ordered_attempts(2·A) | cur_player(1)
                                    per slot: (cell/A, was_blocked) — -1 for unused slots
-    public_state       : 2            step/max_length(1) | cur_player(1)  [abrupt]
-                                     num_placed/A(1)    | cur_player(1)  [non-abrupt]
+    public_state       : 2·A+2        one_hot_step(2·A+1) | cur_player(1)  [abrupt]
+                                     A+2                one_hot_placed(A+1) | cur_player(1)  [non-abrupt]
 """
 
 from __future__ import annotations
@@ -296,14 +296,15 @@ class MNK(Env):
         # Standard MNK: same as public_observation.
         if not self.dark:
             return self.public_observation(state, key)
-        # Abrupt: every step is a turn switch, so the step count is public.
+        # Abrupt: every step is a turn switch, so the step index is public.
         # Non-abrupt: step count leaks how many blocks occurred (private), so
         # only the number of successfully placed stones is public.
         if self.abrupt:
-            progress = state.step.astype(jnp.float32) / self.max_length
+            indicator = jax.nn.one_hot(state.step, self.max_length + 1, dtype=jnp.float32)
         else:
-            progress = (state.board > 0).sum().astype(jnp.float32) / self.num_actions
-        return jnp.array([progress, state.cur_player.astype(jnp.float32)])
+            num_placed = (state.board > 0).sum()
+            indicator = jax.nn.one_hot(num_placed, self.num_actions + 1, dtype=jnp.float32)
+        return jnp.concatenate([indicator, jnp.array([state.cur_player], dtype=jnp.float32)])
 
     def state_representation(self, state: MNKState, key: PRNGKey) -> jax.Array:
         return self.state_observation(state, key)
