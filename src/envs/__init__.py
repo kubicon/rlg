@@ -3,6 +3,7 @@ from .noisy import NoisyEnv, NoisyEnvState
 from .goofspiel import Goofspiel
 from .leduc_holdem import LeducHoldem
 from .battleship import Battleship
+from .liars_dice import LiarsDice
 from .normal_form import (
   NormalFormGame,
   RockPaperScissors,
@@ -14,6 +15,7 @@ _REGISTRY: dict[str, type] = {
   "goofspiel": Goofspiel,
   "leduc": LeducHoldem,
   "battleship": Battleship,
+  "liars_dice": LiarsDice,
   "normal_form": NormalFormGame,
   "rps": RockPaperScissors,
   "matching_pennies": MatchingPennies,

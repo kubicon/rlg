@@ -1,4 +1,5 @@
 sweep:
+  algorithm.n_epochs: [1, 2, 3, 4, 5, 7, 10]
   algorithm.loss_type: [rnad, mmd]
   env:
     - name: leduc
@@ -10,12 +11,10 @@ sweep:
     - name: battleship
       board_size: 2
       ship_lengths:
-        - 2
+      - 2
       reward_type: binary
-  
-  env.obs_noise: [0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0]
-  seed: [0, 1, 2, 3, 4]
- 
+
+seed: 0
 env:
   name: leduc
   reward_type: difference
@@ -32,7 +31,7 @@ algorithm:
   delta_clip: 1.0
   trace_clip: 1.0
   target_update_rate: 0.001
-  magnet_coef: 0.25
+  magnet_coef: 0.2
   old_policy_coef: 0.05
   magnet_interval: 2000
   loss_type: rnad
@@ -46,8 +45,8 @@ algorithm:
         type: mlp
         feature_dim: 128
         hidden:
-          - 128
-          - 128
+        - 128
+        - 128
         activation: gelu
         norm: rms
       head1:
@@ -59,5 +58,5 @@ trainer:
   n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/observation_noise
+  checkpoint_dir: public_experiments/epochs
   save_metrics: true

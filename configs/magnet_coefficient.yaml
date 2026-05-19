@@ -65,8 +65,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 50000
+  n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/magnet_strength
+  checkpoint_dir: public_experiments/magnet_coefficient
   save_metrics: true
