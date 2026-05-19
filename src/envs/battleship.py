@@ -369,7 +369,10 @@ class Battleship(Env):
     return jnp.where(state.phase == 0, place_mask, shoot_mask)
 
   # ── Perfect-recall representations ───────────────────────────────────────
-  # Board history is fully captured by ship_grids and shot_grids.
+  # NOTE: information_set is intentionally lossy — shot grids record *which*
+  # cells were fired at but not the order. In Battleship the shot order carries
+  # no strategic information (hits/misses are revealed immediately and the set
+  # of available actions depends only on unshot cells), so this is acceptable.
 
   def information_set(
     self, state: BattleshipState, player_id: jax.Array | int, key: PRNGKey

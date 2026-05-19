@@ -5,6 +5,7 @@ from .leduc_holdem import LeducHoldem
 from .battleship import Battleship
 from .liars_dice import LiarsDice
 from .hex import Hex
+from .mnk import MNK, TicTacToe
 from .normal_form import (
   NormalFormGame,
   RockPaperScissors,
@@ -18,6 +19,8 @@ _REGISTRY: dict[str, type] = {
   "battleship": Battleship,
   "liars_dice": LiarsDice,
   "hex": Hex,
+  "mnk": MNK,
+  "tictactoe": TicTacToe,
   "normal_form": NormalFormGame,
   "rps": RockPaperScissors,
   "matching_pennies": MatchingPennies,
