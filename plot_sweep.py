@@ -9,6 +9,9 @@ Usage:
     python plot_sweep.py public_experiments/magnet_strength --curve-key magnet_coef
     python plot_sweep.py public_experiments/magnet_strength --curve-key magnet_coef --out-dir plots/magnet/
     python plot_sweep.py public_experiments/magnet_strength --curve-key magnet_coef --metric nashconv
+
+Plots are saved into exp_dir by default (one PNG per group, containing both linear
+and log y-scale side-by-side).
 """
 
 import argparse
@@ -57,8 +60,10 @@ def _figure_title(group_keys: dict[str, str]) -> str:
   return "  |  ".join(f"{k}={v}" for k, v in group_keys.items())
 
 
-def _out_filename(group_keys: dict[str, str]) -> str:
-  return "_".join(f"{k}={v}" for k, v in group_keys.items()) + ".png"
+def _out_filename(group_keys: dict[str, str], yscale: str = "linear") -> str:
+  base = "_".join(f"{k}={v}" for k, v in group_keys.items()) if group_keys else "all"
+  suffix = "_log" if yscale == "log" else ""
+  return base + suffix + ".png"
 
 
 def _lighten_color(color, amount: float = 0.35):
@@ -109,28 +114,31 @@ def plot_sweep(exp_dir: Path, curve_key: str, metric: str, out_dir: Path) -> Non
     group_dict = dict(group_key)
     sorted_curves = sorted(curve_map.items(), key=lambda x: _try_numeric(x[0]))
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    for label, seed_runs in sorted_curves:
-      all_values = np.stack([v for _, v in seed_runs])
-      steps = seed_runs[0][0]
-      plot_label = None if seed_is_curve else f"{curve_key}={label}"
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+    for ax, yscale in zip(axes, ("linear", "log")):
+      for label, seed_runs in sorted_curves:
+        all_values = np.stack([v for _, v in seed_runs])
+        steps = seed_runs[0][0]
+        plot_label = None if seed_is_curve else f"{curve_key}={label}"
 
-      if has_seed and len(seed_runs) > 1:
-        mean = np.mean(all_values, axis=0)
-        sem = np.std(all_values, axis=0, ddof=1) / np.sqrt(len(seed_runs))
-        ci = 1.96 * sem
-        (line,) = ax.plot(steps, mean, linewidth=1.5, label=plot_label)
-        ax.fill_between(steps, mean - ci, mean + ci, color=_lighten_color(line.get_color()))
-      else:
-        ax.plot(steps, all_values[0], linewidth=1.5, label=plot_label)
+        if has_seed and len(seed_runs) > 1:
+          mean = np.mean(all_values, axis=0)
+          sem = np.std(all_values, axis=0, ddof=1) / np.sqrt(len(seed_runs))
+          ci = 1.96 * sem
+          (line,) = ax.plot(steps, mean, linewidth=1.5, label=plot_label)
+          ax.fill_between(steps, mean - ci, mean + ci, color=_lighten_color(line.get_color()))
+        else:
+          ax.plot(steps, all_values[0], linewidth=1.5, label=plot_label)
 
-    ax.set_xlabel("Step")
-    ax.set_ylabel(metric)
-    ax.set_title(_figure_title(group_dict))
-    if not seed_is_curve:
-      ax.legend()
+      ax.set_xlabel("Step")
+      ax.set_ylabel(metric)
+      ax.set_yscale(yscale)
+      ax.set_title(f"{_figure_title(group_dict)}  ({yscale} scale)" if group_dict else f"({yscale} scale)")
+      ax.grid(True, alpha=0.3, which="both")
+      if not seed_is_curve:
+        ax.legend()
+
     fig.tight_layout()
-
     out_path = out_dir / _out_filename(group_dict)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -159,11 +167,11 @@ def main() -> None:
     "--out-dir",
     type=Path,
     default=None,
-    help="Output directory for PNGs (default: plots/<exp_dir_name>/)",
+    help="Output directory for PNGs (default: exp_dir itself)",
   )
   args = parser.parse_args()
 
-  out_dir = args.out_dir or Path("plots") / args.exp_dir.name
+  out_dir = args.out_dir or args.exp_dir
   print(f"Plotting {args.exp_dir} → {out_dir}/")
   plot_sweep(args.exp_dir, args.curve_key, args.metric, out_dir)
 
