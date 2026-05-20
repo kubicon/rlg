@@ -46,7 +46,7 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 200000
+  n_steps: 500000
   log_every: 2000
   checkpoint_every: 2000
   checkpoint_dir: public_experiments/entropy/goofspiel
