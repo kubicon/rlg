@@ -84,8 +84,20 @@ def generate(spec_path: Path, fallback_dir: Path) -> list[Path]:
     spec = yaml.safe_load(f)
 
   sweep_spec: dict = spec.pop("sweep", {})
+  sweep_zip_spec: dict = spec.pop("sweep_zip", {})
 
-  if not sweep_spec:
+  # Build paired zip combos (all zip keys advance together, not crossed).
+  if sweep_zip_spec:
+    zip_keys = list(sweep_zip_spec.keys())
+    zip_rows = list(zip(*[sweep_zip_spec[k] for k in zip_keys]))
+    zip_combos: list[dict] = [dict(zip(zip_keys, row)) for row in zip_rows]
+    # Only scalar-valued zip keys appear in the suffix (skip lists/dicts).
+    zip_label_keys = [k for k in zip_keys if not isinstance(sweep_zip_spec[k][0], (list, dict))]
+  else:
+    zip_combos = [{}]
+    zip_label_keys = []
+
+  if not sweep_spec and not sweep_zip_spec:
     out_path = _config_out_path(spec, fallback_dir, "")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
@@ -96,17 +108,20 @@ def generate(spec_path: Path, fallback_dir: Path) -> list[Path]:
   sweep_values = [sweep_spec[k] for k in sweep_keys]
 
   written: list[Path] = []
-  for combo in itertools.product(*sweep_values):
-    overrides = dict(zip(sweep_keys, combo))
-    config = _apply_overrides(spec, overrides)
-    suffix = _combo_suffix(sweep_keys, combo)
-    if "trainer" in config and "checkpoint_dir" in config["trainer"]:
-      config["trainer"]["checkpoint_dir"] += f"/{suffix}"
-    out_path = _config_out_path(config, fallback_dir, suffix)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as f:
-      yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-    written.append(out_path)
+  for zip_combo in zip_combos:
+    for combo in (itertools.product(*sweep_values) if sweep_keys else [()]):
+      overrides = {**zip_combo, **dict(zip(sweep_keys, combo))}
+      config = _apply_overrides(spec, overrides)
+      zip_parts = [f"{_short_key(k)}={_value_label(zip_combo[k])}" for k in zip_label_keys]
+      cart_parts = [f"{_short_key(k)}={_value_label(v)}" for k, v in zip(sweep_keys, combo)]
+      suffix = "_".join(zip_parts + cart_parts)
+      if "trainer" in config and "checkpoint_dir" in config["trainer"]:
+        config["trainer"]["checkpoint_dir"] += f"/{suffix}"
+      out_path = _config_out_path(config, fallback_dir, suffix)
+      out_path.parent.mkdir(parents=True, exist_ok=True)
+      with open(out_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+      written.append(out_path)
 
   return written
 
