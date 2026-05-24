@@ -151,10 +151,31 @@ def plot_sweep(exp_dir: Path, curve_keys: list[str], metric: str, out_dir: Path)
       ax.set_yscale(yscale)
       ax.set_title(f"{_figure_title(group_dict)}  ({yscale} scale)" if group_dict else f"({yscale} scale)")
       ax.grid(True, alpha=0.3, which="both")
-      if not seed_is_curve:
-        ax.legend()
+
+    legend_below = False
+    if not seed_is_curve:
+      n_curves = len(sorted_curves)
+      if n_curves <= 6:
+        for ax in axes:
+          ax.legend(fontsize="small")
+      else:
+        # shared legend below the figure to avoid covering the plots
+        handles, labels = axes[0].get_legend_handles_labels()
+        ncols = min(4, n_curves)
+        n_rows = -(-n_curves // ncols)  # ceiling division
+        fig.legend(
+          handles, labels,
+          loc="lower center",
+          bbox_to_anchor=(0.5, 0),
+          ncol=ncols,
+          fontsize="small",
+          framealpha=0.9,
+        )
+        legend_below = True
 
     fig.tight_layout()
+    if legend_below:
+      fig.subplots_adjust(bottom=0.06 + 0.06 * n_rows)
     out_path = out_dir / _out_filename(group_dict)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
