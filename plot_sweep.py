@@ -66,6 +66,19 @@ def _out_filename(group_keys: dict[str, str], yscale: str = "linear") -> str:
   return base + suffix + ".png"
 
 
+def _get_colors(n: int) -> list:
+  """Return *n* perceptually distinct colors."""
+  import colorsys
+  if n <= 10:
+    cmap = matplotlib.colormaps["tab10"]
+    return [cmap(i) for i in range(n)]
+  if n <= 20:
+    cmap = matplotlib.colormaps["tab20"]
+    return [cmap(i) for i in range(n)]
+  # evenly spaced hues in HLS space for arbitrarily many curves
+  return [colorsys.hls_to_rgb(i / n, 0.45, 0.85) for i in range(n)]
+
+
 def _lighten_color(color, amount: float = 0.35):
   """Blend *color* toward white by *amount* (0 = unchanged, 1 = white)."""
   import matplotlib.colors as mc
@@ -125,9 +138,10 @@ def plot_sweep(exp_dir: Path, curve_keys: list[str], metric: str, out_dir: Path)
     group_dict = dict(group_key)
     sorted_curves = sorted(curve_map.items(), key=lambda x: _curve_sort_key(x[0]))
 
+    colors = _get_colors(len(sorted_curves))
     fig, axes = plt.subplots(1, 2, figsize=(13, 4))
     for ax, yscale in zip(axes, ("linear", "log")):
-      for label, seed_runs in sorted_curves:
+      for (label, seed_runs), color in zip(sorted_curves, colors):
         all_values = np.stack([v for _, v in seed_runs])
         steps = seed_runs[0][0]
         if seed_is_curve:
@@ -141,10 +155,10 @@ def plot_sweep(exp_dir: Path, curve_keys: list[str], metric: str, out_dir: Path)
           mean = np.mean(all_values, axis=0)
           sem = np.std(all_values, axis=0, ddof=1) / np.sqrt(len(seed_runs))
           ci = 1.96 * sem
-          (line,) = ax.plot(steps, mean, linewidth=1.5, label=plot_label)
+          (line,) = ax.plot(steps, mean, linewidth=1.5, label=plot_label, color=color)
           ax.fill_between(steps, mean - ci, mean + ci, color=_lighten_color(line.get_color()))
         else:
-          ax.plot(steps, all_values[0], linewidth=1.5, label=plot_label)
+          ax.plot(steps, all_values[0], linewidth=1.5, label=plot_label, color=color)
 
       ax.set_xlabel("Step")
       ax.set_ylabel(metric)
