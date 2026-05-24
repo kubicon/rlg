@@ -73,14 +73,14 @@ def _lighten_color(color, amount: float = 0.35):
   return tuple(1.0 - amount * (1.0 - c))
 
 
-def plot_sweep(exp_dir: Path, curve_key: str, metric: str, out_dir: Path) -> None:
+def plot_sweep(exp_dir: Path, curve_keys: list[str], metric: str, out_dir: Path) -> None:
   subdirs = [d for d in sorted(exp_dir.iterdir()) if d.is_dir()]
 
   # collect all runs with parseable names and existing metric file
   runs: list[tuple[dict, np.ndarray, np.ndarray]] = []
   for d in subdirs:
     params = _parse_name(d.name)
-    if curve_key not in params:
+    if not all(k in params for k in curve_keys):
       continue
     npz = d / "exploitability.npz"
     if not npz.exists():
@@ -98,28 +98,44 @@ def plot_sweep(exp_dir: Path, curve_key: str, metric: str, out_dir: Path) -> Non
 
   # when seed is a sweep param, aggregate over it instead of splitting curves
   has_seed = any("seed" in params for params, _, _ in runs)
-  seed_is_curve = has_seed and curve_key == "seed"
-  exclude_from_group = {curve_key} | ({"seed"} if has_seed else set())
+  seed_is_curve = has_seed and curve_keys == ["seed"]
+  exclude_from_group = set(curve_keys) | ({"seed"} if has_seed else set())
+
+  def _curve_label(params: dict) -> str:
+    if seed_is_curve:
+      return "_"
+    if len(curve_keys) == 1:
+      return params[curve_keys[0]]
+    return " | ".join(f"{k}={params[k]}" for k in curve_keys)
+
+  def _curve_sort_key(label: str):
+    # sort single-key labels numerically; multi-key labels lexicographically
+    return _try_numeric(label)
 
   # group_key -> curve_label -> [(steps, values), ...]
   groups: dict[tuple, dict[str, list]] = {}
   for params, steps, values in runs:
     group_key = tuple((k, v) for k, v in params.items() if k not in exclude_from_group)
-    cv = "_" if seed_is_curve else params[curve_key]
+    cv = _curve_label(params)
     groups.setdefault(group_key, {}).setdefault(cv, []).append((steps, values))
 
   out_dir.mkdir(parents=True, exist_ok=True)
 
   for group_key, curve_map in groups.items():
     group_dict = dict(group_key)
-    sorted_curves = sorted(curve_map.items(), key=lambda x: _try_numeric(x[0]))
+    sorted_curves = sorted(curve_map.items(), key=lambda x: _curve_sort_key(x[0]))
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 4))
     for ax, yscale in zip(axes, ("linear", "log")):
       for label, seed_runs in sorted_curves:
         all_values = np.stack([v for _, v in seed_runs])
         steps = seed_runs[0][0]
-        plot_label = None if seed_is_curve else f"{curve_key}={label}"
+        if seed_is_curve:
+          plot_label = None
+        elif len(curve_keys) == 1:
+          plot_label = f"{curve_keys[0]}={label}"
+        else:
+          plot_label = label  # already contains "k=v | k=v" pairs
 
         if has_seed and len(seed_runs) > 1:
           mean = np.mean(all_values, axis=0)
@@ -156,7 +172,9 @@ def main() -> None:
   parser.add_argument(
     "--curve-key",
     required=True,
-    help="Hyperparameter to vary across curves within each figure",
+    nargs="+",
+    help="Hyperparameter(s) to vary across curves within each figure. "
+         "Multiple keys produce combined labels (e.g. --curve-key feature_dim activation norm).",
   )
   parser.add_argument(
     "--metric",
