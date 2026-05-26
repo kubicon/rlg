@@ -5,10 +5,8 @@ sweep:
 
 seed: 0
 env:
-  name: goofspiel
-  n_cards: 5
-  prize_order: descending
-  reward_type: binary
+  name: leduc
+  reward_type: difference
 algorithm:
   type: mmd
   n_epochs: 1
@@ -50,5 +48,5 @@ trainer:
   n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/alternating_goofspiel
+  checkpoint_dir: public_experiments/alternating/leduc
   save_metrics: true

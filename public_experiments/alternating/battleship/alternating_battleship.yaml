@@ -5,8 +5,11 @@ sweep:
 
 seed: 0
 env:
-  name: leduc
-  reward_type: difference
+  name: battleship
+  board_size: 2
+  ship_lengths:
+  - 2
+  reward_type: binary
 algorithm:
   type: mmd
   n_epochs: 1
@@ -45,8 +48,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 200000
+  n_steps: 100000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/alternating_leduc
+  checkpoint_dir: public_experiments/alternating/battleship
   save_metrics: true

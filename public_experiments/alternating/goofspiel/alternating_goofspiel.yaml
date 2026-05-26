@@ -5,10 +5,9 @@ sweep:
 
 seed: 0
 env:
-  name: battleship
-  board_size: 2
-  ship_lengths:
-  - 2
+  name: goofspiel
+  n_cards: 5
+  prize_order: descending
   reward_type: binary
 algorithm:
   type: mmd
@@ -48,8 +47,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 100000
+  n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/alternating_battleship
+  checkpoint_dir: public_experiments/alternating/goofspiel
   save_metrics: true
