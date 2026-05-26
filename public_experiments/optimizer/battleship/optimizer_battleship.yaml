@@ -1,0 +1,59 @@
+sweep:
+  seed: [0, 1, 2, 3, 4]
+  algorithm.loss_type: [mmd, rnad]
+  algorithm.optimizer:
+    - {type: sgd, lr: 0.0003, name: sgd}
+    - {type: adam, lr: 0.0003, name: adam}
+    - {type: adamw, lr: 0.0003, name: adamw}
+    - {type: adam, lr: 0.0003, b1: 0.0, name: adam_b10}
+    - {type: adamw, lr: 0.0003, b1: 0.0, name: adamw_b10}
+
+seed: 0
+env:
+  name: battleship
+  board_size: 2
+  ship_lengths:
+  - 2
+  reward_type: binary
+algorithm:
+  type: mmd
+  n_epochs: 1
+  batch_size: 64
+  lr: 0.0003
+  clip_eps: 0.1
+  vf_coef: 0.5
+  ent_coef: 0.03
+  gamma: 1.0
+  gae_lambda: 0.95
+  delta_clip: 1.0
+  trace_clip: 1.0
+  target_update_rate: 0.001
+  magnet_coef: 0.2
+  old_policy_coef: 0.05
+  magnet_interval: 2000
+  loss_type: mmd
+  neurd_clip: 5.0
+  neurd_threshold: 2.0
+  agent:
+    type: actor_critic
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden:
+        - 128
+        - 128
+        activation: gelu
+        norm: rms
+      head1:
+        type: categorical
+        n_actions: null
+      head2:
+        type: value
+trainer:
+  n_steps: 100000
+  log_every: 2000
+  checkpoint_every: 2000
+  checkpoint_dir: public_experiments/optimizer/battleship
+  save_metrics: true
