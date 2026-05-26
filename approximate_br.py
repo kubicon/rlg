@@ -38,6 +38,7 @@ _MMD_ONLY_KEYS = frozenset(
     "loss_type",
     "neurd_clip",
     "neurd_threshold",
+    "alternating",
   }
 )
 

@@ -21,6 +21,7 @@ algorithm:
   loss_type: mmd
   neurd_clip: 5.0
   neurd_threshold: 2.0
+  alternating: false
   agent:
     type: actor_critic
     network:

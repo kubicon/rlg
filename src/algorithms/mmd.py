@@ -76,6 +76,7 @@ class MMD(PPOBase):
     loss_type: LossType = LossType.MMD,
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
+    alternating: bool = False,
   ) -> None:
     super().__init__(
       env,
@@ -100,6 +101,7 @@ class MMD(PPOBase):
     self.loss_type = loss_type
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
+    self.alternating = alternating
 
   # ── Init ──────────────────────────────────────────────────────────────────
 
@@ -137,6 +139,13 @@ class MMD(PPOBase):
 
     params, opt_state = state.params, state.opt_state
     valid = self._valid_mask(episodes.dones)
+
+    if self.alternating:
+      n_players = self.env.num_players
+      active = state.step % n_players
+      # Scale by n_players so the loss magnitude is unchanged relative to the
+      # joint case (where all players' losses are summed).
+      player_mask = jnp.zeros(n_players).at[active].set(float(n_players))
 
     def epoch_fn(carry, _):
       params, opt_state = carry
@@ -187,7 +196,10 @@ class MMD(PPOBase):
             self.neurd_clip,
             self.neurd_threshold,
           )
-        wmean = lambda x: self._wmean(x, valid)
+        if self.alternating:
+          wmean = lambda x: self._wmean(x * player_mask, valid)
+        else:
+          wmean = lambda x: self._wmean(x, valid)
         return wmean(losses), jax.tree.map(wmean, metrics)  # type: ignore
 
       (_, metrics), grads = jax.value_and_grad(total_loss, has_aux=True)(params)
