@@ -4,9 +4,9 @@ sweep:
   algorithm.optimizer:
     - {type: sgd, lr: 0.0003, name: sgd}
     - {type: adam, lr: 0.0003, name: adam}
-    - {type: adamw, lr: 0.0003, name: adamw}
-    - {type: adam, lr: 0.0003, b1: 0.0, name: adam_b10}
-    - {type: adamw, lr: 0.0003, b1: 0.0, name: adamw_b10}
+    - {type: adamw, lr: 0.0003, weight_decay: 0.001, name: adamw}
+    - {type: adam, lr: 0.0003, b1: 0.0, name: adamb1}
+    - {type: adamw, lr: 0.0003, b1: 0.0, weight_decay: 0.001, name: adamwb1}
 
 seed: 0
 env:
