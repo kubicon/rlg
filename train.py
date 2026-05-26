@@ -16,6 +16,7 @@ import pickle
 import sys
 import yaml
 import jax
+import optax
 
 from src.envs import build_env
 from src.networks.configs import build_network
@@ -28,6 +29,19 @@ _ALGORITHMS = {
   "ppo": PPO,
   "mmd": MMD,
 }
+
+_OPTIMIZERS = {
+  "adam": lambda cfg: optax.adam(cfg["lr"], b1=cfg.get("b1", 0.9), b2=cfg.get("b2", 0.999)),
+  "adamw": lambda cfg: optax.adamw(cfg["lr"], b1=cfg.get("b1", 0.9), b2=cfg.get("b2", 0.999), weight_decay=cfg.get("weight_decay", 1e-4)),
+  "sgd": lambda cfg: optax.sgd(cfg["lr"], momentum=cfg.get("momentum", 0.0)),
+}
+
+
+def build_optimizer(opt_cfg: dict) -> optax.GradientTransformation:
+  opt_type = opt_cfg.get("type", "adam").lower()
+  if opt_type not in _OPTIMIZERS:
+    raise ValueError(f"Unknown optimizer '{opt_type}'. Choose from: {list(_OPTIMIZERS)}")
+  return _OPTIMIZERS[opt_type](opt_cfg)
 
 
 def _fill_env_dims(cfg: dict, env) -> dict:
@@ -96,7 +110,9 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
       f"Unknown algorithm '{alg_type}'. Choose from: {list(_ALGORITHMS)}"
     )
 
-  algorithm = _ALGORITHMS[alg_type](env=env, agent=agent, **alg_cfg)
+  opt_cfg = alg_cfg.pop("optimizer", None)
+  optimizer = build_optimizer(opt_cfg) if opt_cfg is not None else None
+  algorithm = _ALGORITHMS[alg_type](env=env, agent=agent, optimizer=optimizer, **alg_cfg)
   print(
     f"algorithm: {alg_type.upper()}"
     f" | rollout={env.max_length}×{env.num_players} players"

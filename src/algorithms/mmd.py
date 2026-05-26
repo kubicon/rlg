@@ -74,6 +74,8 @@ class MMD(PPOBase):
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
     loss_type: LossType = LossType.MMD,
+    optimizer: optax.GradientTransformation | None = None,
+    grad_clip: float | None = None,
   ) -> None:
     super().__init__(
       env,
@@ -88,6 +90,8 @@ class MMD(PPOBase):
       gae_lambda,
       delta_clip,
       trace_clip,
+      optimizer,
+      grad_clip,
     )
     self.magnet_coef = magnet_coef
     self.old_policy_coef = old_policy_coef

@@ -53,6 +53,8 @@ class PPOBase(Algorithm):
     gae_lambda: float = 0.95,
     delta_clip: float = 1.0,
     trace_clip: float = 1.0,
+    optimizer: optax.GradientTransformation | None = None,
+    grad_clip: float | None = None,
   ) -> None:
     self.env = env
     self.agent = agent
@@ -65,7 +67,12 @@ class PPOBase(Algorithm):
     self.gae_lambda = gae_lambda
     self.delta_clip = delta_clip
     self.trace_clip = trace_clip
-    self.optimizer = optax.adam(lr)
+    base_optimizer = optimizer if optimizer is not None else optax.adam(lr)
+    self.optimizer = (
+      optax.chain(optax.clip_by_global_norm(grad_clip), base_optimizer)
+      if grad_clip is not None
+      else base_optimizer
+    )
 
   def _init_common(self, key: jax.Array):
     key, env_key, net_key = jax.random.split(key, 3)
@@ -139,7 +146,9 @@ class PPO(PPOBase):
       agent:      Agent whose player_evaluate drives rollout and re-evaluation.
       n_epochs:   Gradient passes over each rollout.
       batch_size:  Independent episodes per iteration (B).
-      lr:          Adam learning rate.
+      lr:          Learning rate used when `optimizer` is None (builds Adam).
+      optimizer:   Any optax optimizer (e.g. ``optax.adamw(lr)``,
+                   ``optax.sgd(lr)``). Overrides `lr` when provided.
       clip_eps:    PPO clip ratio ε; also used for value-function clipping.
       vf_coef:     Value-function loss coefficient.
       ent_coef:    Entropy bonus coefficient.

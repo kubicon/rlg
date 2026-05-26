@@ -31,7 +31,9 @@ algorithm:
   type: mmd
   n_epochs: 1
   batch_size: 64
-  lr: 0.0003
+  optimizer:
+    type: adam
+    lr: 0.0003
   clip_eps: 0.1
   vf_coef: 0.5
   ent_coef: 0.01
