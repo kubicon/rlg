@@ -1,0 +1,54 @@
+sweep:
+  algorithm.gae_lambda: [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0]
+  algorithm.loss_type: [rnad, mmd]
+  seed: [0, 1, 2, 3, 4]
+
+seed: 0
+env:
+  name: battleship
+  board_size: 2
+  ship_lengths:
+  - 2
+  reward_type: binary
+algorithm:
+  type: mmd
+  n_epochs: 1
+  batch_size: 64
+  lr: 0.0003
+  clip_eps: 0.1
+  vf_coef: 0.5
+  ent_coef: 0.03
+  gamma: 1.0
+  gae_lambda: 0.95
+  delta_clip: 1.0
+  trace_clip: 1.0
+  target_update_rate: 0.001
+  magnet_coef: 0.2
+  old_policy_coef: 0.05
+  magnet_interval: 2000
+  loss_type: rnad
+  neurd_clip: 5.0
+  neurd_threshold: 3.0
+  agent:
+    type: actor_critic
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden:
+        - 128
+        - 128
+        activation: gelu
+        norm: rms
+      head1:
+        type: categorical
+        n_actions: null
+      head2:
+        type: value
+trainer:
+  n_steps: 100000
+  log_every: 2000
+  checkpoint_every: 2000
+  checkpoint_dir: public_experiments/gae_lambda/battleship
+  save_metrics: true
