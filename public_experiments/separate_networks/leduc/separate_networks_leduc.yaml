@@ -1,0 +1,174 @@
+sweep:
+  seed: [0, 1, 2, 3, 4]
+sweep_zip:
+  algorithm.agent.network_label: [twin_4, twin_8, twin_16, twin_32, separate_4, separate_8, separate_16, separate_32]
+  algorithm.agent.network:
+  - type: twin_head
+    torso:
+      type: mlp
+      feature_dim: 4
+      hidden: [4, 4]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    head2:
+      type: value
+  - type: twin_head
+    torso:
+      type: mlp
+      feature_dim: 8
+      hidden: [8, 8]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    head2:
+      type: value
+  - type: twin_head
+    torso:
+      type: mlp
+      feature_dim: 16
+      hidden: [16, 16]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    head2:
+      type: value
+  - type: twin_head
+    torso:
+      type: mlp
+      feature_dim: 32
+      hidden: [32, 32]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    head2:
+      type: value
+  - type: separate_twin_head
+    torso1:
+      type: mlp
+      feature_dim: 4
+      hidden: [4, 4]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    torso2:
+      type: mlp
+      feature_dim: 4
+      hidden: [4, 4]
+      activation: gelu
+      norm: rms
+    head2:
+      type: value
+  - type: separate_twin_head
+    torso1:
+      type: mlp
+      feature_dim: 8
+      hidden: [8, 8]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    torso2:
+      type: mlp
+      feature_dim: 8
+      hidden: [8, 8]
+      activation: gelu
+      norm: rms
+    head2:
+      type: value
+  - type: separate_twin_head
+    torso1:
+      type: mlp
+      feature_dim: 16
+      hidden: [16, 16]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    torso2:
+      type: mlp
+      feature_dim: 16
+      hidden: [16, 16]
+      activation: gelu
+      norm: rms
+    head2:
+      type: value
+  - type: separate_twin_head
+    torso1:
+      type: mlp
+      feature_dim: 32
+      hidden: [32, 32]
+      activation: gelu
+      norm: rms
+    head1:
+      type: categorical
+      n_actions: null
+    torso2:
+      type: mlp
+      feature_dim: 32
+      hidden: [32, 32]
+      activation: gelu
+      norm: rms
+    head2:
+      type: value
+
+seed: 0
+env:
+  name: leduc
+  reward_type: difference
+algorithm:
+  type: mmd
+  n_epochs: 1
+  batch_size: 64
+  optimizer:
+    type: adam
+    lr: 0.0003
+  clip_eps: 0.1
+  vf_coef: 0.5
+  ent_coef: 0.03
+  gamma: 1.0
+  gae_lambda: 0.95
+  delta_clip: 1.0
+  trace_clip: 1.0
+  target_update_rate: 0.001
+  magnet_coef: 0.2
+  old_policy_coef: 0.05
+  magnet_interval: 2000
+  loss_type: mmd
+  neurd_clip: 5.0
+  neurd_threshold: 3.0
+  agent:
+    type: actor_critic
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden:
+        - 128
+        - 128
+        activation: gelu
+        norm: rms
+      head1:
+        type: categorical
+        n_actions: null
+      head2:
+        type: value
+trainer:
+  n_steps: 500000
+  log_every: 2000
+  checkpoint_every: 2000
+  checkpoint_dir: public_experiments/separate_networks/leduc
+  save_metrics: true
