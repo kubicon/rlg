@@ -1,0 +1,46 @@
+seed: 0
+env:
+  name: leduc
+  reward_type: difference
+algorithm:
+  type: qmmd
+  n_epochs: 1
+  batch_size: 64
+  optimizer:
+    type: adam
+    lr: 0.0003
+  clip_eps: 0.1
+  qf_coef: 0.5
+  ent_coef: 0.03
+  gamma: 1.0
+  magnet_coef: 0.2
+  old_policy_coef: 0.05
+  target_update_rate: 0.001
+  magnet_interval: 2000
+  retrace_lambda: 1.0
+  loss_type: rnad
+  neurd_clip: 5.0
+  neurd_threshold: 3.0
+  agent:
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden:
+        - 128
+        - 128
+        activation: gelu
+        norm: rms
+      head1:
+        type: categorical
+        n_actions: null
+      head2:
+        type: q
+        n_actions: null
+trainer:
+  n_steps: 40000
+  log_every: 2000
+  checkpoint_every: 2000
+  checkpoint_dir: public_experiments/qmmd_rnad
+  save_metrics: true

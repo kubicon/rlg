@@ -20,15 +20,23 @@ import optax
 
 from src.envs import build_env
 from src.networks.configs import build_network
-from src.agents.actor_critic import ActorCriticAgent
+from src.agents.actor_critic import ActorCriticAgent, QActorCriticAgent, PolicyQAgent
 from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
+from src.algorithms.mmd_q import QMMD
 from src.trainers.trainer import StandardTrainer, StdoutLogger
 
 
 _ALGORITHMS = {
   "ppo": PPO,
   "mmd": MMD,
+  "qmmd": QMMD,
+}
+
+_AGENT_CLASSES = {
+  "ppo": ActorCriticAgent,
+  "mmd": ActorCriticAgent,
+  "qmmd": PolicyQAgent,
 }
 
 _OPTIMIZERS = {
@@ -104,7 +112,8 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
 
   net_cfg = _fill_env_dims(agent_cfg["network"], env)
   network = build_network(net_cfg)
-  agent = ActorCriticAgent(network)
+  agent_class = _AGENT_CLASSES.get(alg_type, ActorCriticAgent)
+  agent = agent_class(network)
 
   # ── Algorithm ──────────────────────────────────────────────────────────
   if alg_type not in _ALGORITHMS:
@@ -155,5 +164,5 @@ if __name__ == "__main__":
   args = sys.argv[1:]
   resume = "--resume" in args
   args = [a for a in args if a != "--resume"]
-  config_path = args[0] if args else "configs/mmd_goofspiel.yaml"
+  config_path = args[0] if args else "configs/qmmd.yaml"
   main(config_path, resume=resume)

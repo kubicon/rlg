@@ -205,10 +205,10 @@ def _(action_dim: int, log_std_min: float = -20.0, log_std_max: float = 2.0):
 
 
 @register_head("q")
-def _(n_actions: int):
+def _(n_actions: int, output_scale: float = 0.01):
   from .heads import QHead
 
-  return QHead(n_actions=n_actions)
+  return QHead(n_actions=n_actions, output_scale=output_scale)
 
 
 @register_head("distributional_q")
@@ -248,6 +248,18 @@ def _(torso: dict, head1: dict, head2: dict):
 
   return TwinHead(
     torso=build_torso(torso), head1=build_head(head1), head2=build_head(head2)
+  )
+
+
+@register_network("triple_head")
+def _(torso: dict, head1: dict, head2: dict, head3: dict):
+  from .composite import TripleHead
+
+  return TripleHead(
+    torso=build_torso(torso),
+    head1=build_head(head1),
+    head2=build_head(head2),
+    head3=build_head(head3),
   )
 
 

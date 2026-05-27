@@ -87,10 +87,11 @@ def _collect_player_infosets(
 
 def _build_apply_fn(network):
   """Return a JIT-compiled (params, obs_batch) -> logits_batch function."""
+  zero_state = network._zero_state()
 
   def _apply(params, obs_batch):
     def single(obs):
-      (logits, _), _ = network.apply({"params": params}, obs, None)
+      (logits, _), _ = network.apply({"params": params}, obs, zero_state)
       return logits
 
     return jax.vmap(single)(obs_batch)

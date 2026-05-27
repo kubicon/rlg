@@ -33,6 +33,33 @@ class TwinHead(nn.Module):
     return self.init(key, x, self._zero_state())["params"]
 
 
+class TripleHead(nn.Module):
+  """Shared torso whose features feed three independent heads.
+
+  Returns ((out1, out2, out3), new_state). Designed for actor-critic with an
+  explicit Q-head: head1=CategoricalHead (logits), head2=ValueHead (V),
+  head3=QHead (Q-values per action).
+  """
+
+  torso: Torso
+  head1: Head
+  head2: Head
+  head3: Head
+
+  def __call__(self, x: Any, state: Any) -> tuple[tuple[Any, Any, Any], Any]:
+    features, new_state = self.torso(x, state)
+    return (self.head1(features), self.head2(features), self.head3(features)), new_state
+
+  def _zero_state(self) -> Any:
+    return self.torso._zero_state()
+
+  def init_state(self, params: Any) -> Any:
+    return self.torso.init_state(params["torso"])
+
+  def init_params(self, key: jax.Array, x: Any) -> Any:
+    return self.init(key, x, self._zero_state())["params"]
+
+
 class SeparateTwinHead(nn.Module):
   """Two fully independent (torso, head) pathways, each with its own parameters.
 
