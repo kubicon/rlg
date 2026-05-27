@@ -80,7 +80,7 @@ algorithm:
   type: qmmd
   loss_type: mmd
 trainer:
-  n_steps: 40000
+  n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
   checkpoint_dir: public_experiments/value_type/goofspiel
