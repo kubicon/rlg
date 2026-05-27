@@ -113,6 +113,9 @@ def generate(spec_path: Path, fallback_dir: Path) -> list[Path]:
       overrides = {**zip_combo, **dict(zip(sweep_keys, combo))}
       config = _apply_overrides(spec, overrides)
       zip_parts = [f"{_short_key(k)}={_value_label(zip_combo[k])}" for k in zip_label_keys]
+      # Full `algorithm:` dicts in sweep_zip are not scalar zip keys; still label by type.
+      if "algorithm" in zip_combo and isinstance(zip_combo["algorithm"], dict):
+        zip_parts.insert(0, f"type={zip_combo['algorithm']['type']}")
       cart_parts = [f"{_short_key(k)}={_value_label(v)}" for k, v in zip(sweep_keys, combo)]
       suffix = "_".join(zip_parts + cart_parts)
       if "trainer" in config and "checkpoint_dir" in config["trainer"]:
