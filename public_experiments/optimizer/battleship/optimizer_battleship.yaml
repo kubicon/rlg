@@ -4,9 +4,11 @@ sweep:
   algorithm.optimizer:
     - {type: sgd, lr: 0.0003, name: sgd}
     - {type: adam, lr: 0.0003, name: adam}
-    - {type: adamw, lr: 0.0003, weight_decay: 0.001, name: adamw}
+    - {type: adamw, lr: 0.0003, weight_decay: 0.01, name: adamw}
     - {type: adam, lr: 0.0003, b1: 0.0, name: adamb1}
-    - {type: adamw, lr: 0.0003, b1: 0.0, weight_decay: 0.001, name: adamwb1}
+    - {type: adamw, lr: 0.0003, b1: 0.0, weight_decay: 0.01, name: adamwb1}
+    - {type: muon, lr: 0.0003, name: muon}
+    - {type: muon, lr: 0.0003, weight_decay: 0.01, adam_weight_decay: 0.01, name: muon_wd}
 
 seed: 0
 env:
