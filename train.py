@@ -43,7 +43,7 @@ _OPTIMIZERS = {
   "adam": lambda cfg: optax.adam(cfg["lr"], b1=cfg.get("b1", 0.9), b2=cfg.get("b2", 0.999)),
   "adamw": lambda cfg: optax.adamw(cfg["lr"], b1=cfg.get("b1", 0.9), b2=cfg.get("b2", 0.999), weight_decay=cfg.get("weight_decay", 1e-4)),
   "sgd": lambda cfg: optax.sgd(cfg["lr"], momentum=cfg.get("momentum", 0.0)),
-  "muon": lambda cfg: optax.contrib.muon(cfg["lr"], beta=cfg.get("momentum", 0.95), nesterov=cfg.get("nesterov", True), ns_steps=cfg.get("ns_steps", 5), weight_decay=cfg.get("weight_decay", 0.0), adam_weight_decay=cfg.get("adam_weight_decay", 0.0), adam_learning_rate=cfg.get("adam_learning_rate", 3e-4)),
+  "muon": lambda cfg: optax.contrib.muon(cfg["lr"], beta=cfg.get("momentum", 0.95), nesterov=cfg.get("nesterov", True), ns_steps=cfg.get("ns_steps", 5), weight_decay=cfg.get("weight_decay", 0.0), adam_weight_decay=cfg.get("adam_weight_decay", 0.0), adam_learning_rate=float(cfg.get("adam_learning_rate", 3e-4))),
 }
 
 

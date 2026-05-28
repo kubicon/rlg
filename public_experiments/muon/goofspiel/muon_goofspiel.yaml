@@ -32,7 +32,7 @@ algorithm:
     type: muon
     lr: 0.01
     weight_decay: 0.01
-    adam_learning_rate: 3e-4
+    adam_learning_rate: 0.0003
   agent:
     type: actor_critic
     network:
