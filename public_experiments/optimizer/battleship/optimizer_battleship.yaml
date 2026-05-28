@@ -8,7 +8,7 @@ sweep:
     - {type: adam, lr: 0.0003, b1: 0.0, name: adamb1}
     - {type: adamw, lr: 0.0003, b1: 0.0, weight_decay: 0.01, name: adamwb1}
     - {type: muon, lr: 0.0003, name: muon}
-    - {type: muon, lr: 0.0003, weight_decay: 0.01, adam_weight_decay: 0.01, name: muon_wd}
+    - {type: muon, lr: 0.0003, weight_decay: 0.01, adam_weight_decay: 0.01, name: muonw}
 
 seed: 0
 env:

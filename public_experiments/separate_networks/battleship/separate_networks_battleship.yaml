@@ -1,7 +1,9 @@
 sweep:
   seed: [0, 1, 2, 3, 4]
+  algorithm.loss_type: [mmd, rnad]
+
 sweep_zip:
-  algorithm.agent.network_label: [twin_4, twin_8, twin_16, twin_32, separate_4, separate_8, separate_16, separate_32]
+  algorithm.agent.network_label: [twin4, twin8, twin16, twin32, separate4, separate8, separate16, separate32]
   algorithm.agent.network:
   - type: twin_head
     torso:

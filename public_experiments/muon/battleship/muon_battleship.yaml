@@ -1,19 +1,15 @@
 sweep:
   seed: [0, 1, 2, 3, 4]
-  algorithm.loss_type: [mmd, rnad]
-  algorithm.optimizer:
-    - {type: sgd, lr: 0.0003, name: sgd}
-    - {type: adam, lr: 0.0003, name: adam}
-    - {type: adamw, lr: 0.0003, weight_decay: 0.01, name: adamw}
-    - {type: adam, lr: 0.0003, b1: 0.0, name: adamb1}
-    - {type: adamw, lr: 0.0003, b1: 0.0, weight_decay: 0.01, name: adamwb1}
-    - {type: muon, lr: 0.0003, name: muon}
-    - {type: muon, lr: 0.0003, weight_decay: 0.01, adam_weight_decay: 0.01, name: muonw}
+  algorithm.optimizer.lr: [0.005, 0.01, 0.02, 0.05]
+  algorithm.optimizer.weight_decay: [0.005, 0.01, 0.02]
 
 seed: 0
 env:
-  name: leduc
-  reward_type: difference
+  name: battleship
+  board_size: 2
+  ship_lengths:
+  - 2
+  reward_type: binary
 algorithm:
   type: mmd
   n_epochs: 1
@@ -33,6 +29,11 @@ algorithm:
   loss_type: mmd
   neurd_clip: 5.0
   neurd_threshold: 2.0
+  optimizer:
+    type: muon
+    lr: 0.01
+    weight_decay: 0.01
+    adam_learning_rate: 3e-4
   agent:
     type: actor_critic
     network:
@@ -51,8 +52,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 200000
+  n_steps: 100000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/optimizer/leduc
+  checkpoint_dir: public_experiments/muon/battleship
   save_metrics: true
