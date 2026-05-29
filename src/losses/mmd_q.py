@@ -57,8 +57,12 @@ def mmd_q_loss(
   # baseline — both stop-gradiented — so it never reads untrained Q-values.
   log_prob = log_probs_all[actions]
   sample_log_prob = sample_log_probs_all[actions]
-  advantage = q_target - v_baseline
-  policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantage, clip_eps)
+  
+  q_values = q_values.at[actions].set(q_target)
+  advantage = q_values - v_baseline 
+  policy_loss = jax.vmap(ppo_policy_loss, in_axes=(0, 0, 0, None))(log_probs_all, sample_log_probs_all, advantage, clip_eps)
+  policy_loss = policy_loss.sum()
+  # policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantage, clip_eps)
 
   # ── Q-loss: Q(s, a_taken) → Retrace target, PPO-clipped ──────────────────
   q_taken = q_values[actions]
