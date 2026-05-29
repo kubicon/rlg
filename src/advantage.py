@@ -47,32 +47,7 @@ def retrace(
 
   rev = (bias[::-1], scale[::-1])
   rev_q_ret, _ = jax.lax.associative_scan(compose_affine_transforms, rev)
-  return rev_q_ret[::-1] 
-
-def qboost(
-  rewards: jax.Array,        # (T,) — r_t
-  q_taken: jax.Array,        # (T,) — Q(s_t, a_t) for the sampled action
-  v_target: jax.Array,       # (T,) — V(s_t) = \sum_a \pi(a|s_t) * Q(s_t, a)
-  lambda_param: float | jax.Array, # Constant trace parameter (e.g., 0.95)
-  discount: jax.Array,       # (T,) — \gamma * (1 - done_t)
-  bootstrap_q: float | jax.Array = 0.0,
-) -> jax.Array:              # (T,) — Q_target(s_t, a_t) values
-  """Q-boosting multi-step Expected SARSA(lambda) targets (Fan & Farina, 2026).
-  
-  Implemented as an associative backward scan, matching the structural pattern
-  of vtrace/retrace for full JAX ecosystem compatibility.
-  """
-  bootstrap_q = jnp.broadcast_to(bootstrap_q, jnp.shape(q_taken)[1:])
-
-  # Shift quantities one step forward: index t holds the t+1 values.
-  next_v = jnp.concatenate([v_target[1:], jnp.zeros_like(v_target[:1])])
-   
-  bias = rewards + discount * next_v
-  scale = discount * lambda_param
-
-  rev = (bias[::-1], scale[::-1])
-  rev_q_target, _ = jax.lax.associative_scan(compose_affine_transforms, rev)
-  return rev_q_target[::-1]
+  return rev_q_ret[::-1]
 
 def vtrace(
   reward: jax.Array,

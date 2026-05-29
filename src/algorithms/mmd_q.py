@@ -6,17 +6,21 @@ Architecture differences from MMD:
 
 Q-target computation:
   - Uses Retrace(λ) (Munos et al., 2016) rather than vtrace.
-  - Retrace produces proper multi-step Q-targets with safe IS correction,
-    satisfying the Q-Bellman equation rather than conflating V and Q targets.
-  - Bootstrapping uses V_target(s) = E_{π_target}[Q_target(s,:)] from the
-    Polyak-averaged target network.
+  - Retrace produces proper multi-step Q-targets satisfying the Q-Bellman
+    equation rather than conflating V and Q targets.
+  - The rollout data is on-policy, so the bootstrap and trace use the rollout
+    policy μ over the Polyak target-net Q-values:
+    V(s) = E_{a~μ}[Q_target(s,:)]. With π = μ the Retrace IS factor
+    min(1, π/μ) is identically 1, so the trace coefficient reduces to the
+    constant retrace_lambda (i.e. Expected SARSA(λ) / Q-boosting). The target
+    network is used only for value stability (its Q-values), never its policy.
 
 Policy gradient:
-  - Advantage at the sampled action A(s,a) = q_target − V_target(s), where
-    q_target is the Retrace(λ) target and V_target(s) = E_{π_target}[Q_target]
-    is a target-network baseline. Both are stop-gradiented, so the policy
-    update never reads untrained Q-values for non-sampled actions and the
-    Q-head only sees gradients via the Q-loss.
+  - Advantage at the sampled action A(s,a) = q_target − V(s), where
+    q_target is the Retrace(λ) target and V(s) = E_{a~μ}[Q_target] is the
+    rollout-policy baseline over target-net Q-values. Both are stop-gradiented,
+    so the policy update never reads untrained Q-values for non-sampled actions
+    and the Q-head only sees gradients via the Q-loss.
   - For NeuRD (loss_type=rnad) the full per-action regret vector is
     reconstructed from this single sampled-action advantage via the
     all-actions baseline trick (Srinivasan et al. 2018).
@@ -39,18 +43,13 @@ from .episode import collect_episodes
 from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
-from ..advantage import retrace, qboost
+from ..advantage import retrace
 from ..losses.mmd_q import mmd_q_loss, rnad_q_loss
 
 
 class LossType(StrEnum):
   MMD = "mmd"
   RNAD = "rnad"
-
-
-class ValueType(StrEnum):
-  RETRACE = "retrace"
-  QBOOST = "qboost"
 
 
 class QMMD(PPOBase):
@@ -67,8 +66,6 @@ class QMMD(PPOBase):
       target_update_rate:       Polyak τ for target_params update.
       magnet_interval:          Steps between hard resets of magnet_params.
       retrace_lambda:           Trace decay λ for Retrace (1.0 = full traces).
-      value_type:               "retrace" (Retrace(λ)) or "qboost" (Q-boost Expected SARSA(λ), default).
-      qboost_lambda:            Constant trace λ for Q-boost (ignored when value_type=retrace).
       loss_type:                "mmd" (PPO policy gradient) or "rnad" (NeuRD).
       neurd_clip:               NeuRD logit clip (only used when loss_type=rnad).
       neurd_threshold:          NeuRD logit threshold (only used when loss_type=rnad).
@@ -94,8 +91,6 @@ class QMMD(PPOBase):
     target_update_rate: float = 0.001,
     magnet_interval: int = 2000,
     retrace_lambda: float = 1.0,
-    value_type: ValueType = ValueType.QBOOST,
-    qboost_lambda: float = 0.95,
     loss_type: LossType = LossType.MMD,
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
@@ -128,8 +123,6 @@ class QMMD(PPOBase):
     self.target_update_rate = target_update_rate
     self.magnet_interval = magnet_interval
     self.retrace_lambda = retrace_lambda
-    self.value_type = value_type
-    self.qboost_lambda = qboost_lambda
     self.alternating = alternating
 
   # ── Init ──────────────────────────────────────────────────────────────────
@@ -151,18 +144,20 @@ class QMMD(PPOBase):
   def _compute_q_targets(
     self,
     rewards: jax.Array,          # (B, T, P)
-    target_q_values: jax.Array,  # (B, T, P, A)
-    target_logits: jax.Array,    # (B, T, P, A)
-    sample_logits: jax.Array,    # (B, T, P, A) — behavior policy at rollout
+    target_q_values: jax.Array,  # (B, T, P, A) — Polyak target-net Q (stability)
+    sample_logits: jax.Array,    # (B, T, P, A) — rollout (on-policy) policy
     actions: jax.Array,          # (B, T, P)
     legal_actions: jax.Array,    # (B, T, P, A)
     dones: jax.Array,            # (B, T)
   ) -> jax.Array:                # (B, T, P) — Q targets
-    pi_target = jax.nn.softmax(target_logits, where=legal_actions)   # (B,T,P,A)
+    # On-policy: bootstrap and trace use the rollout policy μ over the target
+    # net's Q-values. Since π = μ the Retrace IS factor min(1, π/μ) is exactly
+    # 1, so the trace coefficient is the constant retrace_lambda (Expected
+    # SARSA(λ) / Q-boosting).
     mu = jax.nn.softmax(sample_logits, where=legal_actions)           # (B,T,P,A)
 
-    # V_target(s) = E_{a~π_target}[Q_target(s, a)]
-    v_target = (pi_target * target_q_values).sum(-1)                  # (B,T,P)
+    # V(s) = E_{a~μ}[Q_target(s, a)]
+    v_target = (mu * target_q_values).sum(-1)                         # (B,T,P)
 
     # Q_target for the observed action
     q_taken = jnp.take_along_axis(
@@ -170,26 +165,12 @@ class QMMD(PPOBase):
     ).squeeze(-1)                                                      # (B,T,P)
 
     discount = (1.0 - dones) * self.gamma                             # (B,T)
+    c = jnp.broadcast_to(self.retrace_lambda, q_taken.shape)          # (B,T,P)
 
-    if self.value_type == ValueType.RETRACE:
-      # IS trace coefficient: λ · min(1, π(a)/μ(a))
-      pi_a = jnp.take_along_axis(
-        pi_target, actions[..., None], axis=-1
-      ).squeeze(-1)                                                    # (B,T,P)
-      mu_a = jnp.take_along_axis(
-        mu, actions[..., None], axis=-1
-      ).squeeze(-1)                                                    # (B,T,P)
-      c = self.retrace_lambda * jnp.minimum(1.0, pi_a / (mu_a + 1e-8)) # (B,T,P)
-
-      # vmap retrace over P (axis 1 in T×P arrays) then over B (axis 0)
-      _retrace_P = jax.vmap(retrace, in_axes=(1, 1, 1, 1, None), out_axes=1)
-      _retrace_BP = jax.vmap(_retrace_P, in_axes=(0, 0, 0, 0, 0), out_axes=0)
-      return _retrace_BP(rewards, q_taken, v_target, c, discount)     # (B,T,P)
-    else:
-      # vmap qboost over P (axis 1 in T×P arrays) then over B (axis 0)
-      _qboost_P = jax.vmap(qboost, in_axes=(1, 1, 1, None, None), out_axes=1)
-      _qboost_BP = jax.vmap(_qboost_P, in_axes=(0, 0, 0, None, 0), out_axes=0)
-      return _qboost_BP(rewards, q_taken, v_target, self.qboost_lambda, discount)  # (B,T,P)
+    # vmap retrace over P (axis 1 in T×P arrays) then over B (axis 0)
+    _retrace_P = jax.vmap(retrace, in_axes=(1, 1, 1, 1, None), out_axes=1)
+    _retrace_BP = jax.vmap(_retrace_P, in_axes=(0, 0, 0, 0, 0), out_axes=0)
+    return _retrace_BP(rewards, q_taken, v_target, c, discount)       # (B,T,P)
 
   # ── Public step ───────────────────────────────────────────────────────────
 
@@ -199,27 +180,24 @@ class QMMD(PPOBase):
       self.env, self.agent, state.params, collect_key, self.batch_size
     )
 
-    # ── Retrace targets from the Polyak target network ─────────────────────
+    # ── Retrace targets: target-net Q-values, on-policy rollout policy ──────
     target_out = self._eval_params(state.extras["target_params"], episodes)
     q_targets = lax.stop_gradient(
       self._compute_q_targets(
         episodes.rewards,
-        target_out.q_values,        # (B,T,P,A)
-        target_out.logits,          # (B,T,P,A)
-        episodes.agent_output.logits,  # (B,T,P,A) — behavior π at rollout
-        episodes.actions,           # (B,T,P)
-        episodes.legal_actions,     # (B,T,P,A)
-        episodes.dones,             # (B,T)
+        target_out.q_values,           # (B,T,P,A) — target-net Q (stability)
+        episodes.agent_output.logits,  # (B,T,P,A) — rollout (on-policy) π
+        episodes.actions,              # (B,T,P)
+        episodes.legal_actions,        # (B,T,P,A)
+        episodes.dones,                # (B,T)
       )
     )  # (B,T,P)
 
-    # ── Target-net state baseline: V_target(s) = E_{π_target}[Q_target(s,:)] ─
-    # Used as the policy-gradient baseline so the advantage never reads
-    # untrained Q-values for non-sampled actions (stable, stop-gradiented).
-    target_pi = jax.nn.softmax(target_out.logits, where=episodes.legal_actions)
-    v_baseline = lax.stop_gradient(
-      (target_pi * target_out.q_values).sum(-1)
-    )  # (B,T,P)
+    # ── Target-net Q-vector for the advantage/regrets ──────────────────────
+    # The loss builds the per-action advantage from this (stop-grad) vector,
+    # overriding the sampled action with its Retrace target and centering by
+    # E_π[·] over the same vector — see losses/mmd_q.py.
+    target_q_values = lax.stop_gradient(target_out.q_values)  # (B,T,P,A)
 
     # ── Magnet logits ──────────────────────────────────────────────────────
     magnet_out = self._eval_params(state.extras["magnet_params"], episodes)
@@ -254,7 +232,7 @@ class QMMD(PPOBase):
             episodes.agent_output.q_values,     # (B,T,P,A) — sampling Q
             magnet_logits,                      # (B,T,P,A)
             q_targets,                          # (B,T,P)
-            v_baseline,                         # (B,T,P)
+            target_q_values,                    # (B,T,P,A)
             self.clip_eps,
             self.qf_coef,
             self.ent_coef,
@@ -276,7 +254,7 @@ class QMMD(PPOBase):
             episodes.agent_output.q_values,     # (B,T,P,A) — sampling Q
             magnet_logits,                      # (B,T,P,A)
             q_targets,                          # (B,T,P)
-            v_baseline,                         # (B,T,P)
+            target_q_values,                    # (B,T,P,A)
             self.clip_eps,
             self.qf_coef,
             self.ent_coef,

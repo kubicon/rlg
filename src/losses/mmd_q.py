@@ -1,22 +1,23 @@
 """MMD-Q loss: policy head + Q-head, no V-head.
 
-The policy gradient never reads Q(s, ·) for non-sampled actions (those
-entries receive no training signal — Retrace only supervises the played
-action). Instead it uses two stop-gradiented quantities computed in the
-algorithm before the epoch loop:
+The policy gradient uses an all-actions advantage built from the Polyak
+target network's Q-vector (stop-gradiented), with the sampled action
+replaced by its multi-step Retrace(λ) target:
 
-    q_target   — Retrace(λ) target for Q(s, a_taken)        (utility)
-    v_baseline — E_{π_target}[Q_target(s, ·)] from the      (baseline)
-                 Polyak target network
+    q_vec(a) = Q_target(s, a),   q_vec(a_taken) = q_target
 
-The advantage at the sampled action is A(s, a) = q_target − v_baseline.
-For NeuRD (rnad_q_loss) the full per-action regret vector is reconstructed
-from this single sampled-action advantage via the all-actions baseline
-trick (Srinivasan et al. 2018, https://arxiv.org/abs/1809.03057), exactly
-as the V-based RNaD loss does.
+The advantage is centered by the baseline E_π[q_vec] over the SAME vector,
+so that Σ_a π(a)·A(s, a) = 0 — an unbiased, variance-reduced per-action
+advantage. Using one consistent (target-net) Q-vector for both the
+per-action values and the baseline is what keeps it centered; mixing the
+live Q-head, a target-net baseline, and a multi-step target across actions
+would leave a systematic offset that biases the update.
 
-The Q-head is supervised only via the Q-loss (Q(s, a_taken) → q_target).
-No separate V-head or V-loss exists.
+For NeuRD (rnad_q_loss) the per-action regret is this same centered
+quantity with the magnet regularization subtracted per action.
+
+The live Q-head is supervised only via the Q-loss (live Q(s, a_taken) →
+q_target) and never enters the advantage. No separate V-head or V-loss.
 """
 
 from __future__ import annotations
@@ -38,8 +39,8 @@ def mmd_q_loss(
   sample_logits: jax.Array,   # (A,) — sampling policy logits (from rollout)
   sample_q_values: jax.Array, # (A,) — sampling Q(s,:) — for Q-loss clipping
   magnet_logits: jax.Array,   # (A,) — magnet (periodically-reset) policy
-  q_target: jax.Array,        # ()   — Retrace(λ) target for Q(s, a_taken)
-  v_baseline: jax.Array,      # ()   — E_{π_target}[Q_target(s,:)] (stop-grad)
+  q_target: jax.Array,        # ()   — Retrace(λ) target for Q(s, a_taken) (stop-grad)
+  target_q_values: jax.Array, # (A,) — target-net Q(s,:) (stop-grad) — advantage
   clip_eps: float,
   qf_coef: float,
   ent_coef: float,
@@ -53,18 +54,15 @@ def mmd_q_loss(
   magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
 
   # ── Policy gradient (PPO-clipped, IS ratio vs. sampling policy) ──────────
-  # Advantage uses the Retrace target at the sampled action and a target-net
-  # baseline — both stop-gradiented — so it never reads untrained Q-values.
-  log_prob = log_probs_all[actions]
-  sample_log_prob = sample_log_probs_all[actions]
-  
-  q_values = q_values.at[actions].set(q_target)
-  advantage = q_values - v_baseline 
+  # All-actions advantage from the stop-grad target-net Q-vector, sampled
+  # action replaced by its Retrace target, centered by E_π[·] over the SAME
+  # vector so Σ_a π(a)·A(s,a) = 0. Illegal actions are masked from the sum.
+  q_vec = target_q_values.at[actions].set(q_target)
+  advantage = q_vec - jnp.dot(q_vec, pi)
   policy_loss = jax.vmap(ppo_policy_loss, in_axes=(0, 0, 0, None))(log_probs_all, sample_log_probs_all, advantage, clip_eps)
-  policy_loss = policy_loss.sum()
-  # policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantage, clip_eps)
+  policy_loss = (policy_loss * legal_actions).sum()
 
-  # ── Q-loss: Q(s, a_taken) → Retrace target, PPO-clipped ──────────────────
+  # ── Q-loss: live Q(s, a_taken) → Retrace target, PPO-clipped ─────────────
   q_taken = q_values[actions]
   sample_q_taken = sample_q_values[actions]
   q_loss = ppo_value_loss(q_taken, sample_q_taken, q_target, clip_eps)
@@ -98,8 +96,8 @@ def rnad_q_loss(
   sample_logits: jax.Array,   # (A,) — sampling policy logits (from rollout)
   sample_q_values: jax.Array, # (A,) — sampling Q(s,:) — for Q-loss clipping
   magnet_logits: jax.Array,   # (A,) — magnet (periodically-reset) policy
-  q_target: jax.Array,        # ()   — Retrace(λ) target for Q(s, a_taken)
-  v_baseline: jax.Array,      # ()   — E_{π_target}[Q_target(s,:)] (stop-grad)
+  q_target: jax.Array,        # ()   — Retrace(λ) target for Q(s, a_taken) (stop-grad)
+  target_q_values: jax.Array, # (A,) — target-net Q(s,:) (stop-grad) — regrets
   clip_eps: float,
   qf_coef: float,
   ent_coef: float,
@@ -109,33 +107,31 @@ def rnad_q_loss(
 ) -> tuple[jax.Array, dict]:
   """RNaD-Q loss for a single (timestep, player) sample → scalar.
 
-  Uses NeuRD for the policy gradient. The magnet regularization is applied
-  per-action to a regularized state baseline (as in the V-based RNaD loss):
-      V_reg(s, a) = v_baseline(s) − magnet_coef · (log π(a) − log π_magnet(a))
-
-  Per-action regrets are reconstructed from the single sampled-action
-  advantage (Retrace target − baseline) via the all-actions baseline trick,
-  so the regret vector never depends on untrained Q-values for non-sampled
-  actions.
+  Uses NeuRD for the policy gradient. Per-action regrets are built from the
+  stop-grad target-net Q-vector (sampled action replaced by its Retrace
+  target), with the magnet regularization subtracted per action:
+      Q_reg(s, a) = q_vec(a) − magnet_coef · (log π(a) − log π_magnet(a))
+      regret(s, a) = Q_reg(s, a) − E_π[Q_reg(s, ·)]
+  so the baseline is centered over the same regularized vector. The live
+  Q-head never enters the regret (it is trained only by the Q-loss).
   """
   log_probs_all = safe_log_softmax(logits, legal_actions)    # (A,)
   strategy = jax.nn.softmax(logits, where=legal_actions)     # (A,)
   magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
-  sampling_strategy = jax.nn.softmax(sample_logits, where=legal_actions)
 
-  # ── Regularised per-action baseline: subtract magnet KL per action ───────
-  regularized_value = q_values - rnad_regularization(
+  # ── Per-action regularized Q-vector: target-net Q, sampled → Retrace ─────
+  q_vec = target_q_values.at[actions].set(q_target)
+  q_reg = q_vec - rnad_regularization(
     log_probs_all, magnet_log_probs_all, magnet_coef
   )
-   
 
-  # ── Sampled-action advantage: Retrace target − target-net baseline ───────
-  regrets = q_values - jnp.dot(regularized_value, strategy)
+  # ── Regret = Q_reg(s,a) − E_π[Q_reg(s,·)] (centered over the same vector) ─
+  regrets = q_reg - jnp.dot(q_reg, strategy)
 
   # ── NeuRD policy loss ────────────────────────────────────────────────────
   policy_loss = -neurd_loss(logits, legal_actions, regrets, neurd_clip, neurd_threshold)
 
-  # ── Q-loss: Q(s, a_taken) → Retrace target, PPO-clipped ──────────────────
+  # ── Q-loss: live Q(s, a_taken) → Retrace target, PPO-clipped ─────────────
   q_taken = q_values[actions]
   sample_q_taken = sample_q_values[actions]
   q_loss = ppo_value_loss(q_taken, sample_q_taken, q_target, clip_eps)
