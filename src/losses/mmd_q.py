@@ -25,7 +25,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .ppo import ppo_policy_loss, ppo_value_loss, ppo_entropy_loss
+from .ppo import ppo_value_loss, ppo_entropy_loss
 from .neurd import neurd_loss
 from .rnad import estimate_baseline_regrets, rnad_regularization
 from ..utils import safe_log_softmax, kl_divergence
@@ -53,14 +53,17 @@ def mmd_q_loss(
   sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions)
   magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
 
-  # ── Policy gradient (PPO-clipped, IS ratio vs. sampling policy) ──────────
-  # All-actions advantage from the stop-grad target-net Q-vector, sampled
-  # action replaced by its Retrace target, centered by E_π[·] over the SAME
-  # vector so Σ_a π(a)·A(s,a) = 0. Illegal actions are masked from the sum.
+  # ── Policy gradient: all-actions mean-actor-critic ───────────────────────
+  # Advantage from the stop-grad target-net Q-vector (sampled action set to
+  # its Retrace target), centered by E_π[·] over the SAME vector. The update
+  # is the exact all-actions form  −Σ_a π(a)·A(s,a)  (gradient −Σ_a A_a·∇π_a).
+  # NOTE: summing per-action PPO-clip ratios is NOT a valid policy gradient
+  # (it drops the π(a) weighting) and made the policy loss explode. There is
+  # no IS ratio here: the action expectation is evaluated exactly from the
+  # Q-critic; only states are sampled (on-policy). illegal actions have π=0.
   q_vec = target_q_values.at[actions].set(q_target)
-  advantage = q_vec - jnp.dot(q_vec, pi)
-  policy_loss = jax.vmap(ppo_policy_loss, in_axes=(0, 0, 0, None))(log_probs_all, sample_log_probs_all, advantage, clip_eps)
-  policy_loss = (policy_loss * legal_actions).sum()
+  advantage = jax.lax.stop_gradient(q_vec - jnp.dot(q_vec, pi))
+  policy_loss = -jnp.dot(advantage, pi)
 
   # ── Q-loss: live Q(s, a_taken) → Retrace target, PPO-clipped ─────────────
   q_taken = q_values[actions]
