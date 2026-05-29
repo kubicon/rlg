@@ -30,7 +30,7 @@ from src.tree import (
   extract_game_tree,
 )
 from src.tree.best_response import best_response_values
-from train import _fill_env_dims
+from train import _fill_env_dims, _AGENT_CLASSES
 
 
 # ── Tree preprocessing (done once) ───────────────────────────────────────────
@@ -85,18 +85,9 @@ def _collect_player_infosets(
   return ids, np.stack(obs_list).astype(np.float32), np.stack(mask_list).astype(bool)
 
 
-def _build_apply_fn(network):
-  """Return a JIT-compiled (params, obs_batch) -> logits_batch function."""
-  zero_state = network._zero_state()
-
-  def _apply(params, obs_batch):
-    def single(obs):
-      (logits, _), _ = network.apply({"params": params}, obs, zero_state)
-      return logits
-
-    return jax.vmap(single)(obs_batch)
-
-  return jax.jit(_apply)
+def _build_apply_fn(agent, env):
+  """Return a JIT-compiled (params, infoset_batch) -> logits_batch function."""
+  return agent.build_eval_fn(env)
 
 
 def _params_to_strategy(
@@ -145,9 +136,12 @@ def main(checkpoint_dir: str) -> None:
 
   alg_cfg = dict(cfg["algorithm"])
   agent_cfg = alg_cfg.pop("agent")
+  alg_type = alg_cfg.get("type", "mmd").lower()
   net_cfg = _fill_env_dims(agent_cfg["network"], env)
   network = build_network(net_cfg)
-  agent = ActorCriticAgent(network)  # noqa: F841 (kept for symmetry with train.py)
+  explicit_agent_type = agent_cfg.get("type")
+  agent_class = _AGENT_CLASSES.get(explicit_agent_type or alg_type, ActorCriticAgent)
+  agent = agent_class(network)
 
   # ── Extract game tree (once) ──────────────────────────────────────────
   print("extracting game tree …", flush=True)
@@ -161,11 +155,13 @@ def main(checkpoint_dir: str) -> None:
   print(f"  player 0: {len(ids0)} unique info sets")
   print(f"  player 1: {len(ids1)} unique info sets")
 
-  apply_fn = _build_apply_fn(network)
+  apply_fn = _build_apply_fn(agent, env)
   # Warm up JIT with dummy params from a throw-away init.
   dummy_key = jax.random.key(0)
   dummy_obs = obs0[:1] if len(obs0) > 0 else obs1[:1]
-  dummy_params = agent.init_params(dummy_key, dummy_obs[0])
+  init_env_state = env.init_state(dummy_key)
+  dummy_obs_for_init = agent.dummy_obs(env, init_env_state, dummy_key)
+  dummy_params = agent.init_params(dummy_key, dummy_obs_for_init)
   _ = apply_fn(dummy_params, dummy_obs)
   print("JIT compiled.\n")
 

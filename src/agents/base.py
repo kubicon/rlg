@@ -70,6 +70,26 @@ class Agent(abc.ABC):
     """
     return episodes.infosets
 
+  def build_eval_fn(self, env: Any):
+    """Return a jit-compiled ``(params, infoset_batch) -> logits_batch`` function.
+
+    Used by exploitability evaluation which only needs policy logits.
+    Default implementation passes infoset_batch directly to the network.
+    Override in agents whose network requires a richer obs (e.g. privileged
+    critics) so that eval code can always call this with plain infosets.
+    """
+    network = self.network  # type: ignore[attr-defined]
+    zero_state = network._zero_state()
+
+    def _apply(params, infoset_batch):
+      def single(obs):
+        (logits, _), _ = network.apply({"params": params}, obs, zero_state)
+        return logits
+
+      return jax.vmap(single)(infoset_batch)
+
+    return jax.jit(_apply)
+
   @abc.abstractmethod
   def player_evaluate(self, params: Any, state: Any, obs: Any) -> tuple[Any, Any]:
     """Forward pass on player-private information.

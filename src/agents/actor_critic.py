@@ -188,6 +188,28 @@ class PrivilegedActorCriticAgent(Agent):
     )
     return (episodes.infosets, state_reps)
 
+  def build_eval_fn(self, env: Any):
+    network = self.network
+    zero_state = network._zero_state()
+    init_env_state = env.init_state(jax.random.key(0))
+    dummy_state_rep = jnp.asarray(
+      env.state_representation(init_env_state, jax.random.key(0))
+    )
+
+    def _apply(params, infoset_batch):
+      N = infoset_batch.shape[0]
+      state_rep_batch = jnp.broadcast_to(
+        dummy_state_rep[None], (N,) + dummy_state_rep.shape
+      )
+
+      def single(obs):
+        (logits, _), _ = network.apply({"params": params}, obs, zero_state)
+        return logits
+
+      return jax.vmap(single)((infoset_batch, state_rep_batch))
+
+    return jax.jit(_apply)
+
   def _forward(
     self, params: Any, state: Any, obs: Any
   ) -> tuple[ActorCriticOutput, Any]:
@@ -270,6 +292,28 @@ class PrivilegedPolicyQAgent(Agent):
       episodes.infosets.shape[:2] + (P,) + episodes.state_reps.shape[2:],
     )
     return (episodes.infosets, state_reps)
+
+  def build_eval_fn(self, env: Any):
+    network = self.network
+    zero_state = network._zero_state()
+    init_env_state = env.init_state(jax.random.key(0))
+    dummy_state_rep = jnp.asarray(
+      env.state_representation(init_env_state, jax.random.key(0))
+    )
+
+    def _apply(params, infoset_batch):
+      N = infoset_batch.shape[0]
+      state_rep_batch = jnp.broadcast_to(
+        dummy_state_rep[None], (N,) + dummy_state_rep.shape
+      )
+
+      def single(obs):
+        (logits, _), _ = network.apply({"params": params}, obs, zero_state)
+        return logits
+
+      return jax.vmap(single)((infoset_batch, state_rep_batch))
+
+    return jax.jit(_apply)
 
   def _forward(
     self, params: Any, state: Any, obs: Any
