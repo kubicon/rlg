@@ -22,6 +22,7 @@ No separate V-head or V-loss exists.
 from __future__ import annotations
 
 import jax
+import jax.numpy as jnp
 
 from .ppo import ppo_policy_loss, ppo_value_loss, ppo_entropy_loss
 from .neurd import neurd_loss
@@ -119,17 +120,13 @@ def rnad_q_loss(
   sampling_strategy = jax.nn.softmax(sample_logits, where=legal_actions)
 
   # ── Regularised per-action baseline: subtract magnet KL per action ───────
-  regularized_value = v_baseline - rnad_regularization(
+  regularized_value = q_values - rnad_regularization(
     log_probs_all, magnet_log_probs_all, magnet_coef
   )
+   
 
   # ── Sampled-action advantage: Retrace target − target-net baseline ───────
-  advantage = q_target - v_baseline
-
-  # ── Per-action regrets via the all-actions baseline trick ────────────────
-  regrets = estimate_baseline_regrets(
-    regularized_value, advantage, strategy, sampling_strategy, actions
-  )
+  regrets = q_values - jnp.dot(regularized_value, strategy)
 
   # ── NeuRD policy loss ────────────────────────────────────────────────────
   policy_loss = -neurd_loss(logits, legal_actions, regrets, neurd_clip, neurd_threshold)
