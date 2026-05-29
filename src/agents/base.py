@@ -27,6 +27,7 @@ import abc
 from typing import Any
 
 import jax
+import jax.numpy as jnp
 
 
 class Agent(abc.ABC):
@@ -39,6 +40,35 @@ class Agent(abc.ABC):
   @abc.abstractmethod
   def init_state(self, params: Any) -> Any:
     """Return the initial recurrent carry (None for stateless agents)."""
+
+  def dummy_obs(self, env: Any, env_state: Any, key: jax.Array) -> Any:
+    """Single observation used to initialise network parameters.
+
+    Override when the network requires a different or richer observation than
+    the default information_set (e.g. a privileged critic needs state_rep too).
+    """
+    return env.information_set(env_state, 0, key)
+
+  def make_obs_step(self, infosets: Any, state_rep: Any) -> Any:
+    """Construct the observation passed to player_evaluate during a rollout step.
+
+    infosets:  (P, ...) — information set for each player this step.
+    state_rep: (...)    — ground-truth state representation for this step.
+
+    Default: returns infosets only (ignores state_rep). Override in agents
+    whose critic consumes privileged state information.
+    """
+    return infosets
+
+  def eval_obs(self, episodes: Any) -> Any:
+    """Construct the batched observation passed to player_evaluate during training.
+
+    episodes.infosets:   (B, T, P, ...) — infosets collected during rollout.
+    episodes.state_reps: (B, T, ...)    — state representations per step.
+
+    Default: returns infosets only. Override in agents with a privileged critic.
+    """
+    return episodes.infosets
 
   @abc.abstractmethod
   def player_evaluate(self, params: Any, state: Any, obs: Any) -> tuple[Any, Any]:

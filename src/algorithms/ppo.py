@@ -77,7 +77,7 @@ class PPOBase(Algorithm):
   def _init_common(self, key: jax.Array):
     key, env_key, net_key = jax.random.split(key, 3)
     env_state = self.env.init_state(env_key)
-    dummy_obs = self.env.information_set(env_state, 0, key)
+    dummy_obs = self.agent.dummy_obs(self.env, env_state, key)
     params = self.agent.init_params(net_key, dummy_obs)
     opt_state = self.optimizer.init(params)
     agent_state = self.agent.init_state(params)
@@ -85,9 +85,10 @@ class PPOBase(Algorithm):
 
   def _eval_params(self, params: Any, episodes) -> Any:
     """Re-evaluate params over all (B, T) steps → agent_out shaped (B, T, P, ...)."""
+    obs = self.agent.eval_obs(episodes)
     eval_T = jax.vmap(self.agent.player_evaluate, in_axes=(None, 0, 0))
     eval_BT = jax.vmap(eval_T, in_axes=(None, 0, 0))
-    agent_out, _ = eval_BT(params, episodes.agent_states, episodes.infosets)
+    agent_out, _ = eval_BT(params, episodes.agent_states, obs)
     return agent_out
 
   def _compute_advantages(

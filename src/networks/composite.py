@@ -60,6 +60,49 @@ class TripleHead(nn.Module):
     return self.init(key, x, self._zero_state())["params"]
 
 
+class SplitTwinHead(nn.Module):
+  """Two independent (torso, head) pathways fed from different observations.
+
+  actor_torso + actor_head process actor_obs (e.g. information set).
+  critic_torso + critic_head process critic_obs (e.g. ground-truth state).
+
+  Input x must be a tuple (actor_obs, critic_obs).
+  Returns ((actor_out, critic_out), (new_actor_state, new_critic_state)).
+
+  Use with PrivilegedPolicyQAgent to train the Q-critic on privileged state
+  information while the actor still sees only the player's information set.
+  """
+
+  actor_torso: Torso
+  actor_head: Head
+  critic_torso: Torso
+  critic_head: Head
+
+  def __call__(
+    self, x: tuple[Any, Any], state: tuple[Any, Any]
+  ) -> tuple[tuple[Any, Any], tuple[Any, Any]]:
+    actor_obs, critic_obs = x
+    state_actor, state_critic = state
+    actor_features, new_state_actor = self.actor_torso(actor_obs, state_actor)
+    critic_features, new_state_critic = self.critic_torso(critic_obs, state_critic)
+    return (
+      self.actor_head(actor_features),
+      self.critic_head(critic_features),
+    ), (new_state_actor, new_state_critic)
+
+  def _zero_state(self) -> tuple[Any, Any]:
+    return self.actor_torso._zero_state(), self.critic_torso._zero_state()
+
+  def init_state(self, params: Any) -> tuple[Any, Any]:
+    return (
+      self.actor_torso.init_state(params["actor_torso"]),
+      self.critic_torso.init_state(params["critic_torso"]),
+    )
+
+  def init_params(self, key: jax.Array, x: Any) -> Any:
+    return self.init(key, x, self._zero_state())["params"]
+
+
 class SeparateTwinHead(nn.Module):
   """Two fully independent (torso, head) pathways, each with its own parameters.
 

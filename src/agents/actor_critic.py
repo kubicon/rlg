@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 
 import jax
+import jax.numpy as jnp
 import flax.linen as nn
 
 from .base import Agent
@@ -120,6 +121,155 @@ class PolicyQAgent(Agent):
 
   def init_state(self, params: Any) -> Any:
     return self.network.init_state(params)
+
+  def _forward(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[PolicyQOutput, Any]:
+    (logits, q_values), new_state = self.network.apply({"params": params}, obs, state)
+    return PolicyQOutput(logits=logits, q_values=q_values), new_state
+
+  def player_evaluate(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[PolicyQOutput, Any]:
+    return self._forward(params, state, obs)
+
+  def public_evaluate(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[PolicyQOutput, Any]:
+    return self._forward(params, state, obs)
+
+  def state_evaluate(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[PolicyQOutput, Any]:
+    return self._forward(params, state, obs)
+
+
+class PrivilegedActorCriticAgent(Agent):
+  """ActorCriticAgent whose V-critic sees the ground-truth state, not the infoset.
+
+  The actor (logits) is computed from the player's information set as usual.
+  The value head receives ``state_representation`` — privileged information
+  not available to agents during play — enabling a centralised value baseline
+  with full knowledge of the hidden state (e.g. opponent hands in card games).
+
+  Requires a ``SplitTwinHead`` network whose actor_torso/actor_head pathway
+  handles the infoset and whose critic_torso/critic_head (a ``ValueHead``)
+  handles the state representation.
+
+  Args:
+    network: SplitTwinHead-compatible module returning
+             ((logits, value), (actor_state, critic_state)).
+  """
+
+  def __init__(self, network: nn.Module) -> None:
+    self.network = network
+
+  def init_params(self, key: jax.Array, dummy_obs: Any) -> Any:
+    return self.network.init_params(key, dummy_obs)
+
+  def init_state(self, params: Any) -> Any:
+    return self.network.init_state(params)
+
+  def dummy_obs(self, env: Any, env_state: Any, key: jax.Array) -> Any:
+    infoset = env.information_set(env_state, 0, key)
+    state_rep = env.state_representation(env_state, key)
+    return (infoset, state_rep)
+
+  def make_obs_step(self, infosets: Any, state_rep: Any) -> Any:
+    P = infosets.shape[0]
+    state_reps = jnp.broadcast_to(state_rep[None], (P,) + state_rep.shape)
+    return (infosets, state_reps)
+
+  def eval_obs(self, episodes: Any) -> Any:
+    P = episodes.infosets.shape[2]
+    state_reps = jnp.broadcast_to(
+      episodes.state_reps[:, :, None],
+      episodes.infosets.shape[:2] + (P,) + episodes.state_reps.shape[2:],
+    )
+    return (episodes.infosets, state_reps)
+
+  def _forward(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[ActorCriticOutput, Any]:
+    (logits, value), new_state = self.network.apply({"params": params}, obs, state)
+    return ActorCriticOutput(logits=logits, value=value), new_state
+
+  def player_evaluate(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[ActorCriticOutput, Any]:
+    return self._forward(params, state, obs)
+
+  def public_evaluate(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[ActorCriticOutput, Any]:
+    return self._forward(params, state, obs)
+
+  def state_evaluate(
+    self, params: Any, state: Any, obs: Any
+  ) -> tuple[ActorCriticOutput, Any]:
+    return self._forward(params, state, obs)
+
+
+class PrivilegedPolicyQAgent(Agent):
+  """PolicyQAgent whose Q-critic sees the ground-truth state, not the infoset.
+
+  The actor (logits) is computed from the player's information set as usual.
+  The Q-head receives ``state_representation`` — privileged information that
+  is not available to agents during play — enabling a centralised critic with
+  full knowledge of the hidden state (e.g. opponent hands in card games).
+
+  Requires a ``SplitTwinHead`` network whose actor_torso/actor_head pathway
+  handles the infoset and whose critic_torso/critic_head pathway handles the
+  state representation.  The two pathways have independent parameters and may
+  have different input sizes.
+
+  During rollout the agent calls ``make_obs_step`` to bundle
+  ``(infosets, broadcast_state_rep)`` into a single obs tuple that is passed
+  to ``player_evaluate``.  During training ``eval_obs`` reassembles the same
+  tuple from the stored episode fields.
+
+  Args:
+    network: SplitTwinHead-compatible module returning
+             ((logits, q_values), (actor_state, critic_state)).
+  """
+
+  def __init__(self, network: nn.Module) -> None:
+    self.network = network
+
+  def init_params(self, key: jax.Array, dummy_obs: Any) -> Any:
+    return self.network.init_params(key, dummy_obs)
+
+  def init_state(self, params: Any) -> Any:
+    return self.network.init_state(params)
+
+  def dummy_obs(self, env: Any, env_state: Any, key: jax.Array) -> Any:
+    import jax.numpy as jnp
+    infoset = env.information_set(env_state, 0, key)
+    state_rep = env.state_representation(env_state, key)
+    return (infoset, state_rep)
+
+  def make_obs_step(self, infosets: Any, state_rep: Any) -> Any:
+    """Bundle (infosets, broadcast_state_rep) for a single rollout step.
+
+    infosets:  (P, ...)  — one infoset per player.
+    state_rep: (...)     — single ground-truth state rep, broadcast to P.
+    """
+    import jax.numpy as jnp
+    P = infosets.shape[0]
+    state_reps = jnp.broadcast_to(
+      state_rep[None], (P,) + state_rep.shape
+    )
+    return (infosets, state_reps)
+
+  def eval_obs(self, episodes: Any) -> Any:
+    """Assemble (infosets, state_reps) with matching (B, T, P, ...) shapes."""
+    import jax.numpy as jnp
+    P = episodes.infosets.shape[2]
+    state_reps = jnp.broadcast_to(
+      episodes.state_reps[:, :, None],
+      episodes.infosets.shape[:2] + (P,) + episodes.state_reps.shape[2:],
+    )
+    return (episodes.infosets, state_reps)
 
   def _forward(
     self, params: Any, state: Any, obs: Any

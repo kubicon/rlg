@@ -20,7 +20,13 @@ import optax
 
 from src.envs import build_env
 from src.networks.configs import build_network
-from src.agents.actor_critic import ActorCriticAgent, QActorCriticAgent, PolicyQAgent
+from src.agents.actor_critic import (
+  ActorCriticAgent,
+  QActorCriticAgent,
+  PolicyQAgent,
+  PrivilegedActorCriticAgent,
+  PrivilegedPolicyQAgent,
+)
 from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
 from src.algorithms.mmd_q import QMMD
@@ -34,6 +40,12 @@ _ALGORITHMS = {
 }
 
 _AGENT_CLASSES = {
+  # by explicit agent.type in config
+  "actor_critic": ActorCriticAgent,
+  "privileged_actor_critic": PrivilegedActorCriticAgent,
+  "policy_q": PolicyQAgent,
+  "privileged_policy_q": PrivilegedPolicyQAgent,
+  # legacy: fall back to algorithm type
   "ppo": ActorCriticAgent,
   "mmd": ActorCriticAgent,
   "qmmd": PolicyQAgent,
@@ -112,7 +124,8 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
 
   net_cfg = _fill_env_dims(agent_cfg["network"], env)
   network = build_network(net_cfg)
-  agent_class = _AGENT_CLASSES.get(alg_type, ActorCriticAgent)
+  explicit_agent_type = agent_cfg.get("type")
+  agent_class = _AGENT_CLASSES.get(explicit_agent_type or alg_type, ActorCriticAgent)
   agent = agent_class(network)
 
   # ── Algorithm ──────────────────────────────────────────────────────────

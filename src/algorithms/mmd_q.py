@@ -39,13 +39,18 @@ from .episode import collect_episodes
 from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
-from ..advantage import retrace
+from ..advantage import retrace, qboost
 from ..losses.mmd_q import mmd_q_loss, rnad_q_loss
 
 
 class LossType(StrEnum):
   MMD = "mmd"
   RNAD = "rnad"
+
+
+class ValueType(StrEnum):
+  RETRACE = "retrace"
+  QBOOST = "qboost"
 
 
 class QMMD(PPOBase):
@@ -62,6 +67,8 @@ class QMMD(PPOBase):
       target_update_rate:       Polyak τ for target_params update.
       magnet_interval:          Steps between hard resets of magnet_params.
       retrace_lambda:           Trace decay λ for Retrace (1.0 = full traces).
+      value_type:               "retrace" (Retrace(λ)) or "qboost" (Q-boost Expected SARSA(λ), default).
+      qboost_lambda:            Constant trace λ for Q-boost (ignored when value_type=retrace).
       loss_type:                "mmd" (PPO policy gradient) or "rnad" (NeuRD).
       neurd_clip:               NeuRD logit clip (only used when loss_type=rnad).
       neurd_threshold:          NeuRD logit threshold (only used when loss_type=rnad).
@@ -87,6 +94,8 @@ class QMMD(PPOBase):
     target_update_rate: float = 0.001,
     magnet_interval: int = 2000,
     retrace_lambda: float = 1.0,
+    value_type: ValueType = ValueType.QBOOST,
+    qboost_lambda: float = 0.95,
     loss_type: LossType = LossType.MMD,
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
@@ -119,6 +128,8 @@ class QMMD(PPOBase):
     self.target_update_rate = target_update_rate
     self.magnet_interval = magnet_interval
     self.retrace_lambda = retrace_lambda
+    self.value_type = value_type
+    self.qboost_lambda = qboost_lambda
     self.alternating = alternating
 
   # ── Init ──────────────────────────────────────────────────────────────────
@@ -135,9 +146,9 @@ class QMMD(PPOBase):
       extras={"target_params": params, "magnet_params": params},
     )
 
-  # ── Retrace target computation ─────────────────────────────────────────────
+  # ── Q-target computation ──────────────────────────────────────────────────
 
-  def _compute_retrace_targets(
+  def _compute_q_targets(
     self,
     rewards: jax.Array,          # (B, T, P)
     target_q_values: jax.Array,  # (B, T, P, A)
@@ -146,7 +157,7 @@ class QMMD(PPOBase):
     actions: jax.Array,          # (B, T, P)
     legal_actions: jax.Array,    # (B, T, P, A)
     dones: jax.Array,            # (B, T)
-  ) -> jax.Array:                # (B, T, P) — Q^ret(s_t, a_t)
+  ) -> jax.Array:                # (B, T, P) — Q targets
     pi_target = jax.nn.softmax(target_logits, where=legal_actions)   # (B,T,P,A)
     mu = jax.nn.softmax(sample_logits, where=legal_actions)           # (B,T,P,A)
 
@@ -158,21 +169,27 @@ class QMMD(PPOBase):
       target_q_values, actions[..., None], axis=-1
     ).squeeze(-1)                                                      # (B,T,P)
 
-    # IS trace coefficient: λ · min(1, π(a)/μ(a))
-    pi_a = jnp.take_along_axis(
-      pi_target, actions[..., None], axis=-1
-    ).squeeze(-1)                                                      # (B,T,P)
-    mu_a = jnp.take_along_axis(
-      mu, actions[..., None], axis=-1
-    ).squeeze(-1)                                                      # (B,T,P)
-    c = self.retrace_lambda * jnp.minimum(1.0, pi_a / (mu_a + 1e-8)) # (B,T,P)
-
     discount = (1.0 - dones) * self.gamma                             # (B,T)
 
-    # vmap retrace over P (axis 1 in T×P arrays) then over B (axis 0)
-    _retrace_P = jax.vmap(retrace, in_axes=(1, 1, 1, 1, None), out_axes=1)
-    _retrace_BP = jax.vmap(_retrace_P, in_axes=(0, 0, 0, 0, 0), out_axes=0)
-    return _retrace_BP(rewards, q_taken, v_target, c, discount)       # (B,T,P)
+    if self.value_type == ValueType.RETRACE:
+      # IS trace coefficient: λ · min(1, π(a)/μ(a))
+      pi_a = jnp.take_along_axis(
+        pi_target, actions[..., None], axis=-1
+      ).squeeze(-1)                                                    # (B,T,P)
+      mu_a = jnp.take_along_axis(
+        mu, actions[..., None], axis=-1
+      ).squeeze(-1)                                                    # (B,T,P)
+      c = self.retrace_lambda * jnp.minimum(1.0, pi_a / (mu_a + 1e-8)) # (B,T,P)
+
+      # vmap retrace over P (axis 1 in T×P arrays) then over B (axis 0)
+      _retrace_P = jax.vmap(retrace, in_axes=(1, 1, 1, 1, None), out_axes=1)
+      _retrace_BP = jax.vmap(_retrace_P, in_axes=(0, 0, 0, 0, 0), out_axes=0)
+      return _retrace_BP(rewards, q_taken, v_target, c, discount)     # (B,T,P)
+    else:
+      # vmap qboost over P (axis 1 in T×P arrays) then over B (axis 0)
+      _qboost_P = jax.vmap(qboost, in_axes=(1, 1, 1, None, None), out_axes=1)
+      _qboost_BP = jax.vmap(_qboost_P, in_axes=(0, 0, 0, None, 0), out_axes=0)
+      return _qboost_BP(rewards, q_taken, v_target, self.qboost_lambda, discount)  # (B,T,P)
 
   # ── Public step ───────────────────────────────────────────────────────────
 
@@ -185,7 +202,7 @@ class QMMD(PPOBase):
     # ── Retrace targets from the Polyak target network ─────────────────────
     target_out = self._eval_params(state.extras["target_params"], episodes)
     q_targets = lax.stop_gradient(
-      self._compute_retrace_targets(
+      self._compute_q_targets(
         episodes.rewards,
         target_out.q_values,        # (B,T,P,A)
         target_out.logits,          # (B,T,P,A)

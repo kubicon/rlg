@@ -275,6 +275,18 @@ def _(torso1: dict, head1: dict, torso2: dict, head2: dict):
   )
 
 
+@register_network("split_twin_head")
+def _(actor_torso: dict, actor_head: dict, critic_torso: dict, critic_head: dict):
+  from .composite import SplitTwinHead
+
+  return SplitTwinHead(
+    actor_torso=build_torso(actor_torso),
+    actor_head=build_head(actor_head),
+    critic_torso=build_torso(critic_torso),
+    critic_head=build_head(critic_head),
+  )
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 

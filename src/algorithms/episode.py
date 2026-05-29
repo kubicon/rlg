@@ -29,16 +29,15 @@ class Episode(NamedTuple):
   over T and P — the algorithm extracts whatever fields it needs from it.
   """
 
-  env_states: Any  # (T,)             — environment states
-  agent_states: Any  # (T,)             — agent states
-  legal_actions: (
-    Any  # (T, P)             — legal actions # Can be extracted from env_states
-  )
-  infosets: Any  # (T, P)             — infosets # Can be extracted from env_state
-  dones: jax.Array  # (T,)  bool         — True when episode ended
-  rewards: jax.Array  # (T, P)             — per-player rewards
-  actions: jax.Array  # (T, P)             — 0-indexed sampled actions
-  agent_output: Any  # (T, P, ...)        — full agent evaluate output
+  env_states: Any        # (T,)       — environment states
+  agent_states: Any      # (T,)       — agent states
+  legal_actions: Any     # (T, P)     — legal actions
+  infosets: Any          # (T, P)     — per-player information sets
+  state_reps: Any        # (T, ...)   — ground-truth state representations
+  dones: jax.Array       # (T,)  bool — True when episode ended
+  rewards: jax.Array     # (T, P)     — per-player rewards
+  actions: jax.Array     # (T, P)     — 0-indexed sampled actions
+  agent_output: Any      # (T, P, ...) — full agent evaluate output
 
 
 def collect_episodes(
@@ -150,23 +149,28 @@ def collect_episode(
 
   def scan_step(carry, _):
     env_state, agent_state, rng = carry
-    rng, act_key, env_key, obs_key = jax.random.split(rng, 4)
+    rng, act_key, env_key, obs_key, state_key = jax.random.split(rng, 5)
     obs_keys = jax.random.split(obs_key, P)
 
     infosets = jax.vmap(env.information_set, in_axes=(None, 0, 0))(
       env_state, jnp.arange(P), obs_keys
     )
+    state_rep = env.state_representation(env_state, state_key)
     legal_actions = jax.vmap(env.legal_actions, in_axes=(None, 0))(
       env_state, jnp.arange(P)
     )
 
+    # Construct obs for this agent (infosets only, or richer tuple for privileged agents)
+    obs = agent.make_obs_step(infosets, state_rep)
+
     # Batched forward pass: obs (P, obs_dim) → agent_output with (P, ...) fields
-    agent_out, new_agent_state = agent.player_evaluate(params, agent_state, infosets)
+    agent_out, new_agent_state = agent.player_evaluate(params, agent_state, obs)
 
     if opp_params is None:
       logits_masked = jnp.where(legal_actions, agent_out.logits, -jnp.inf)
     else:
-      opp_out, _ = agent.player_evaluate(opp_params, agent_state, infosets)
+      opp_obs = agent.make_obs_step(infosets, state_rep)
+      opp_out, _ = agent.player_evaluate(opp_params, agent_state, opp_obs)
       is_br = jnp.arange(P) == br_player
       mixed_logits = jnp.where(is_br[:, None], agent_out.logits, opp_out.logits)
       logits_masked = jnp.where(legal_actions, mixed_logits, -jnp.inf)
@@ -180,7 +184,7 @@ def collect_episode(
       rewards = rewards / env.max_reward
 
     step = Episode(
-      env_state, agent_state, legal_actions, infosets, done, rewards, actions, agent_out
+      env_state, agent_state, legal_actions, infosets, state_rep, done, rewards, actions, agent_out
     )
     return (new_env_state, new_agent_state, rng), step
 
