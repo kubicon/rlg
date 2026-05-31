@@ -25,7 +25,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .ppo import ppo_value_loss, ppo_entropy_loss
+from .ppo import ppo_policy_loss, ppo_value_loss, ppo_entropy_loss
 from .neurd import neurd_loss
 from .rnad import estimate_baseline_regrets, rnad_regularization
 from ..utils import safe_log_softmax, kl_divergence
@@ -42,7 +42,7 @@ def mmd_q_loss(
   q_target: jax.Array,        # ()   — Retrace(λ) target for Q(s, a_taken) (stop-grad)
   target_q_values: jax.Array, # (A,) — target-net Q(s,:) (stop-grad) — advantage
   clip_eps: float,
-  qf_coef: float,
+  vf_coef: float,
   ent_coef: float,
   magnet_coef: float,
   old_policy_coef: float,
@@ -54,17 +54,16 @@ def mmd_q_loss(
   magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
 
   # ── Policy gradient: all-actions mean-actor-critic ───────────────────────
-  # Advantage from the stop-grad target-net Q-vector (sampled action set to
-  # its Retrace target), centered by E_π[·] over the SAME vector. The update
-  # is the exact all-actions form  −Σ_a π(a)·A(s,a)  (gradient −Σ_a A_a·∇π_a).
-  # NOTE: summing per-action PPO-clip ratios is NOT a valid policy gradient
-  # (it drops the π(a) weighting) and made the policy loss explode. There is
-  # no IS ratio here: the action expectation is evaluated exactly from the
-  # Q-critic; only states are sampled (on-policy). illegal actions have π=0.
+  # NOTE: Tried to do the gradient update across all actions, it had much more variance and with smaller batches it was unstable.
+  # With this approach it works and is comparable to V-value function.
+  log_prob = log_probs_all[actions]
+  sample_log_prob = sample_log_probs_all[actions]
+  
   q_vec = target_q_values.at[actions].set(q_target)
-  advantage = jax.lax.stop_gradient(q_vec - jnp.dot(q_vec, pi))
-  policy_loss = -jnp.dot(advantage, pi)
-
+  v_baseline = jnp.dot(q_vec, pi)
+  advantage = q_target - v_baseline
+  policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantage, clip_eps) 
+  
   # ── Q-loss: live Q(s, a_taken) → Retrace target, PPO-clipped ─────────────
   q_taken = q_values[actions]
   sample_q_taken = sample_q_values[actions]
@@ -77,7 +76,7 @@ def mmd_q_loss(
 
   total = (
     policy_loss
-    + qf_coef * q_loss
+    + vf_coef * q_loss
     + ent_coef * entropy_loss
     + magnet_coef * magnet_loss
     + old_policy_coef * old_kl_loss
@@ -102,7 +101,7 @@ def rnad_q_loss(
   q_target: jax.Array,        # ()   — Retrace(λ) target for Q(s, a_taken) (stop-grad)
   target_q_values: jax.Array, # (A,) — target-net Q(s,:) (stop-grad) — regrets
   clip_eps: float,
-  qf_coef: float,
+  vf_coef: float,
   ent_coef: float,
   magnet_coef: float,
   neurd_clip: float,
@@ -145,7 +144,7 @@ def rnad_q_loss(
   # Magnet KL logged for monitoring; already embedded in regrets above.
   magnet_kl = kl_divergence(log_probs_all, magnet_log_probs_all)
 
-  total = policy_loss + qf_coef * q_loss + ent_coef * entropy_loss
+  total = policy_loss + vf_coef * q_loss + ent_coef * entropy_loss
   return total, {
     "policy_loss": policy_loss,
     "q_loss": q_loss,

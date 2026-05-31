@@ -12,7 +12,7 @@ Q-target computation:
     policy μ over the Polyak target-net Q-values:
     V(s) = E_{a~μ}[Q_target(s,:)]. With π = μ the Retrace IS factor
     min(1, π/μ) is identically 1, so the trace coefficient reduces to the
-    constant retrace_lambda (i.e. Expected SARSA(λ) / Q-boosting). The target
+    constant gae_lambda (i.e. Expected SARSA(λ) / Q-boosting). The target
     network is used only for value stability (its Q-values), never its policy.
 
 Policy gradient:
@@ -58,14 +58,14 @@ class QMMD(PPOBase):
   Args:
       env, agent, n_epochs, batch_size, lr,
       clip_eps, ent_coef, gamma, gae_lambda,
-      delta_clip, trace_clip:   inherited from PPOBase (gae_lambda/delta_clip
+      delta_clip, trace_clip:   inherited from PPOBase (delta_clip/trace_clip
                                  unused — kept for API compatibility).
-      qf_coef:                  Weight of the Q-value loss.
+      vf_coef:                  Weight of the Q-value loss.
       magnet_coef:              Weight of KL(current ‖ magnet) term.
       old_policy_coef:          Weight of KL(current ‖ old policy) term.
       target_update_rate:       Polyak τ for target_params update.
       magnet_interval:          Steps between hard resets of magnet_params.
-      retrace_lambda:           Trace decay λ for Retrace (1.0 = full traces).
+      gae_lambda:               Trace decay λ for Retrace (1.0 = full traces).
       loss_type:                "mmd" (PPO policy gradient) or "rnad" (NeuRD).
       neurd_clip:               NeuRD logit clip (only used when loss_type=rnad).
       neurd_threshold:          NeuRD logit threshold (only used when loss_type=rnad).
@@ -80,7 +80,7 @@ class QMMD(PPOBase):
     batch_size: int = 4,
     lr: float = 3e-4,
     clip_eps: float = 0.2,
-    qf_coef: float = 0.5,
+    vf_coef: float = 0.5,
     ent_coef: float = 0.01,
     gamma: float = 0.99,
     gae_lambda: float = 0.95,
@@ -90,7 +90,6 @@ class QMMD(PPOBase):
     old_policy_coef: float = 0.05,
     target_update_rate: float = 0.001,
     magnet_interval: int = 2000,
-    retrace_lambda: float = 1.0,
     loss_type: LossType = LossType.MMD,
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
@@ -105,7 +104,7 @@ class QMMD(PPOBase):
       batch_size,
       lr,
       clip_eps,
-      vf_coef=0.0,   # no V-head; kept in base for API compatibility
+      vf_coef=0.0,   # base V-head disabled; self.vf_coef below is for Q-loss
       ent_coef=ent_coef,
       gamma=gamma,
       gae_lambda=gae_lambda,
@@ -114,7 +113,7 @@ class QMMD(PPOBase):
       optimizer=optimizer,
       grad_clip=grad_clip,
     )
-    self.qf_coef = qf_coef
+    self.vf_coef = vf_coef
     self.loss_type = loss_type
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
@@ -122,7 +121,6 @@ class QMMD(PPOBase):
     self.old_policy_coef = old_policy_coef
     self.target_update_rate = target_update_rate
     self.magnet_interval = magnet_interval
-    self.retrace_lambda = retrace_lambda
     self.alternating = alternating
 
   # ── Init ──────────────────────────────────────────────────────────────────
@@ -152,7 +150,7 @@ class QMMD(PPOBase):
   ) -> jax.Array:                # (B, T, P) — Q targets
     # On-policy: bootstrap and trace use the rollout policy μ over the target
     # net's Q-values. Since π = μ the Retrace IS factor min(1, π/μ) is exactly
-    # 1, so the trace coefficient is the constant retrace_lambda (Expected
+    # 1, so the trace coefficient is the constant gae_lambda (Expected
     # SARSA(λ) / Q-boosting).
     mu = jax.nn.softmax(sample_logits, where=legal_actions)           # (B,T,P,A)
 
@@ -165,7 +163,7 @@ class QMMD(PPOBase):
     ).squeeze(-1)                                                      # (B,T,P)
 
     discount = (1.0 - dones) * self.gamma                             # (B,T)
-    c = jnp.broadcast_to(self.retrace_lambda, q_taken.shape)          # (B,T,P)
+    c = jnp.broadcast_to(self.gae_lambda, q_taken.shape)          # (B,T,P)
 
     # vmap retrace over P (axis 1 in T×P arrays) then over B (axis 0)
     _retrace_P = jax.vmap(retrace, in_axes=(1, 1, 1, 1, None), out_axes=1)
@@ -234,7 +232,7 @@ class QMMD(PPOBase):
             q_targets,                          # (B,T,P)
             target_q_values,                    # (B,T,P,A)
             self.clip_eps,
-            self.qf_coef,
+            self.vf_coef,
             self.ent_coef,
             self.magnet_coef,
             self.old_policy_coef,
@@ -256,7 +254,7 @@ class QMMD(PPOBase):
             q_targets,                          # (B,T,P)
             target_q_values,                    # (B,T,P,A)
             self.clip_eps,
-            self.qf_coef,
+            self.vf_coef,
             self.ent_coef,
             self.magnet_coef,
             self.neurd_clip,

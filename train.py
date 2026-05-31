@@ -64,7 +64,11 @@ def build_optimizer(opt_cfg: dict) -> optax.GradientTransformation:
   opt_type = opt_cfg.get("type", "adam").lower()
   if opt_type not in _OPTIMIZERS:
     raise ValueError(f"Unknown optimizer '{opt_type}'. Choose from: {list(_OPTIMIZERS)}")
-  return _OPTIMIZERS[opt_type](opt_cfg)
+  optimizer = _OPTIMIZERS[opt_type](opt_cfg)
+  max_grad_norm = opt_cfg.get("max_grad_norm")
+  if max_grad_norm is not None:
+    optimizer = optax.chain(optax.clip_by_global_norm(float(max_grad_norm)), optimizer)
+  return optimizer
 
 
 def _fill_env_dims(cfg: dict, env) -> dict:
