@@ -2,7 +2,7 @@ sweep:
   seed: [0, 1, 2, 3, 4]
 
 sweep_zip:
-  obs_type: [v_infoset, v_state, q_infoset, q_state]
+  obs_type: [v-infoset, v-state, q-infoset, q-state]
   algorithm:
   - type: mmd
     n_epochs: 1
