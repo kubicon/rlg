@@ -24,17 +24,21 @@ def compose_affine_transforms(
 
 
 def retrace(
-  rewards: jax.Array,      # (T,)
-  q_taken: jax.Array,      # (T,) — Q_target(s_t, a_t)
-  v_target: jax.Array,     # (T,) — E_{a~π_target}[Q_target(s_t, a)]
-  c: jax.Array,            # (T,) — λ·min(1, π(a_t)/μ(a_t)) trace coefficients
-  discount: jax.Array,     # (T,) — γ*(1 - done_t)
+  rewards: jax.Array,                    # (T,)
+  q_taken: jax.Array,                    # (T,) — Q_target(s_t, a_t)
+  v_target: jax.Array,                   # (T,) — E_{a~π_target}[Q_target(s_t, a)]
+  discount: jax.Array,                   # (T,) — γ*(1 - done_t)
+  importance_sampling: float | jax.Array = 1.0,
   bootstrap_q: float | jax.Array = 0.0,
-) -> jax.Array:            # (T,) — Q^ret(s_t, a_t) retrace targets
+  lambda_: float | jax.Array = 1.0,
+  clip: float | jax.Array = 1.0,
+) -> jax.Array:                          # (T,) — Q^ret(s_t, a_t) retrace targets
   """Retrace(λ) Q-value targets (Munos et al., 2016).
   Implemented as an associative backward scan (same structure as vtrace) so
   it is fully compatible with jax.jit and jax.vmap.
   """
+  c = jnp.broadcast_to(lambda_ * jnp.minimum(clip, importance_sampling), rewards.shape)
+
   bootstrap_q = jnp.broadcast_to(bootstrap_q, jnp.shape(q_taken)[1:])
 
   # Shift quantities one step forward: index t holds the t+1 value.

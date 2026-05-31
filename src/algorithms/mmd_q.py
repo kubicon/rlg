@@ -163,12 +163,12 @@ class QMMD(PPOBase):
     ).squeeze(-1)                                                      # (B,T,P)
 
     discount = (1.0 - dones) * self.gamma                             # (B,T)
-    c = jnp.broadcast_to(self.gae_lambda, q_taken.shape)          # (B,T,P)
 
     # vmap retrace over P (axis 1 in T×P arrays) then over B (axis 0)
-    _retrace_P = jax.vmap(retrace, in_axes=(1, 1, 1, 1, None), out_axes=1)
-    _retrace_BP = jax.vmap(_retrace_P, in_axes=(0, 0, 0, 0, 0), out_axes=0)
-    return _retrace_BP(rewards, q_taken, v_target, c, discount)       # (B,T,P)
+    _retrace = lambda r, q, v, d: retrace(r, q, v, d, lambda_=self.gae_lambda)
+    _retrace_P = jax.vmap(_retrace, in_axes=(1, 1, 1, None), out_axes=1)
+    _retrace_BP = jax.vmap(_retrace_P, in_axes=(0, 0, 0, 0), out_axes=0)
+    return _retrace_BP(rewards, q_taken, v_target, discount)                           # (B,T,P)
 
   # ── Public step ───────────────────────────────────────────────────────────
 
