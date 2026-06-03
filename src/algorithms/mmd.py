@@ -7,10 +7,11 @@ Two extra parameter sets are maintained alongside the main params:
                    Used for stable GAE bootstrapping and value-loss clipping,
                    exactly as in PPO.
 
-  magnet_params  — Hard-reset copy, replaced with current params every k steps:
-                       magnet ← params   if step % magnet_interval == 0
-                               magnet    otherwise
-                   Used as the reference policy in the KL magnet loss term.
+  magnet_params  — Reference policy for the KL magnet loss term. Update rule
+                   is controlled by magnet_update_type:
+                     periodic:    magnet ← params  if step % magnet_interval == 0
+                                           magnet  otherwise
+                     incremental: magnet ← τ·params + (1−τ)·magnet  every step
 
 Both are stored in TrainingState.extras:
     {'target_params': ..., 'magnet_params': ...}
@@ -31,13 +32,7 @@ from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
-from enum import StrEnum
-
-
-class LossType(StrEnum):
-  PPO = "ppo"
-  RNAD = "rnad"
-  MMD = "mmd"
+from .types import LossType, MagnetUpdateType
 
 
 class MMD(PPOBase):
@@ -50,7 +45,9 @@ class MMD(PPOBase):
       magnet_coef:             Weight of KL(current ‖ magnet) term.
       old_policy_coef:         Weight of KL(current ‖ old policy) term.
       target_update_rate:      Polyak τ for target_params update.
-      magnet_interval:         Steps between hard resets of magnet_params.
+      magnet_interval:         Steps between hard resets (used when magnet_update_type=periodic).
+      magnet_update_rate:      Polyak τ for magnet update (used when magnet_update_type=incremental).
+      magnet_update_type:      "periodic" (hard reset every k steps) or "incremental" (Polyak).
   """
 
   def __init__(
@@ -71,6 +68,8 @@ class MMD(PPOBase):
     old_policy_coef: float = 0.05,
     target_update_rate: float = 0.001,
     magnet_interval: int = 2000,
+    magnet_update_rate: float = 0.001,
+    magnet_update_type: MagnetUpdateType = MagnetUpdateType.PERIODIC,
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
     loss_type: LossType = LossType.MMD,
@@ -98,6 +97,8 @@ class MMD(PPOBase):
     self.old_policy_coef = old_policy_coef
     self.target_update_rate = target_update_rate
     self.magnet_interval = magnet_interval
+    self.magnet_update_rate = magnet_update_rate
+    self.magnet_update_type = magnet_update_type
     self.loss_type = loss_type
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
@@ -214,9 +215,14 @@ class MMD(PPOBase):
     target_params = optax.incremental_update(
       params, state.extras["target_params"], self.target_update_rate
     )
-    magnet_params = optax.periodic_update(
-      params, state.extras["magnet_params"], state.step, self.magnet_interval
-    )
+    if self.magnet_update_type == MagnetUpdateType.INCREMENTAL:
+      magnet_params = optax.incremental_update(
+        params, state.extras["magnet_params"], self.magnet_update_rate
+      )
+    else:
+      magnet_params = optax.periodic_update(
+        params, state.extras["magnet_params"], state.step, self.magnet_interval
+      )
 
     return TrainingState(
       params=params,

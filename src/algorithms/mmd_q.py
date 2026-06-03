@@ -36,20 +36,14 @@ import jax
 import jax.numpy as jnp
 import jax.lax as lax
 import optax
-from enum import StrEnum
-
 from .base import TrainingState
 from .episode import collect_episodes
 from .ppo import PPOBase
+from .types import LossType, MagnetUpdateType
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..advantage import retrace
 from ..losses.mmd_q import mmd_q_loss, rnad_q_loss
-
-
-class LossType(StrEnum):
-  MMD = "mmd"
-  RNAD = "rnad"
 
 
 class QMMD(PPOBase):
@@ -64,7 +58,9 @@ class QMMD(PPOBase):
       magnet_coef:              Weight of KL(current ‖ magnet) term.
       old_policy_coef:          Weight of KL(current ‖ old policy) term.
       target_update_rate:       Polyak τ for target_params update.
-      magnet_interval:          Steps between hard resets of magnet_params.
+      magnet_interval:          Steps between hard resets (used when magnet_update_type=periodic).
+      magnet_update_rate:       Polyak τ for magnet update (used when magnet_update_type=incremental).
+      magnet_update_type:       "periodic" (hard reset every k steps) or "incremental" (Polyak).
       gae_lambda:               Trace decay λ for Retrace (1.0 = full traces).
       loss_type:                "mmd" (PPO policy gradient) or "rnad" (NeuRD).
       neurd_clip:               NeuRD logit clip (only used when loss_type=rnad).
@@ -90,6 +86,8 @@ class QMMD(PPOBase):
     old_policy_coef: float = 0.05,
     target_update_rate: float = 0.001,
     magnet_interval: int = 2000,
+    magnet_update_rate: float = 0.001,
+    magnet_update_type: MagnetUpdateType = MagnetUpdateType.PERIODIC,
     loss_type: LossType = LossType.MMD,
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
@@ -121,6 +119,8 @@ class QMMD(PPOBase):
     self.old_policy_coef = old_policy_coef
     self.target_update_rate = target_update_rate
     self.magnet_interval = magnet_interval
+    self.magnet_update_rate = magnet_update_rate
+    self.magnet_update_type = magnet_update_type
     self.alternating = alternating
 
   # ── Init ──────────────────────────────────────────────────────────────────
@@ -279,9 +279,14 @@ class QMMD(PPOBase):
     target_params = optax.incremental_update(
       params, state.extras["target_params"], self.target_update_rate
     )
-    magnet_params = optax.periodic_update(
-      params, state.extras["magnet_params"], state.step, self.magnet_interval
-    )
+    if self.magnet_update_type == MagnetUpdateType.INCREMENTAL:
+      magnet_params = optax.incremental_update(
+        params, state.extras["magnet_params"], self.magnet_update_rate
+      )
+    else:
+      magnet_params = optax.periodic_update(
+        params, state.extras["magnet_params"], state.step, self.magnet_interval
+      )
 
     return TrainingState(
       params=params,
