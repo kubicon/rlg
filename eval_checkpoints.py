@@ -20,6 +20,7 @@ import numpy as np
 import yaml
 
 from src.envs import build_env, NoisyEnv
+from src.envs.leduc_holdem import LeducHoldem
 from src.networks.configs import build_network
 from src.agents.actor_critic import ActorCriticAgent
 from src.tree import (
@@ -191,16 +192,31 @@ def main(checkpoint_dir: str) -> None:
     strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn)
     strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn)
 
-    p0_init = strat0.get(init_iset0)
-    p1_init = strat1.get(init_iset1)
-    p0_str = (
-      " ".join(f"{p:.3f}" for p in p0_init) if p0_init is not None else "not found"
-    )
-    p1_str = (
-      " ".join(f"{p:.3f}" for p in p1_init) if p1_init is not None else "not found"
-    )
-    print(f"  [ckpt {ckpt_id}] p0 init strategy: [{p0_str}]")
-    print(f"  [ckpt {ckpt_id}] p1 init strategy: [{p1_str}]")
+    if isinstance(env, LeducHoldem):
+      _RANK_NAMES = ["J", "Q", "K"]
+      dummy_state = env.init_state(jax.random.key(0))
+      key0 = jax.random.key(0)
+      for rank in range(3):
+        s = dummy_state._replace(private_cards=jnp.array([rank, 0], dtype=jnp.int32))
+        iset0 = np.asarray(env.information_set(s, jnp.int32(0), key0)).tobytes()
+        iset1 = np.asarray(env.information_set(s._replace(private_cards=jnp.array([0, rank], dtype=jnp.int32)), jnp.int32(1), key0)).tobytes()
+        p0 = strat0.get(iset0)
+        p1 = strat1.get(iset1)
+        p0_str = " ".join(f"{p:.3f}" for p in p0) if p0 is not None else "not found"
+        p1_str = " ".join(f"{p:.3f}" for p in p1) if p1 is not None else "not found"
+        print(f"  [ckpt {ckpt_id}] p0 card={_RANK_NAMES[rank]}: [{p0_str}]")
+        print(f"  [ckpt {ckpt_id}] p1 card={_RANK_NAMES[rank]}: [{p1_str}]")
+    else:
+      p0_init = strat0.get(init_iset0)
+      p1_init = strat1.get(init_iset1)
+      p0_str = (
+        " ".join(f"{p:.3f}" for p in p0_init) if p0_init is not None else "not found"
+      )
+      p1_str = (
+        " ".join(f"{p:.3f}" for p in p1_init) if p1_init is not None else "not found"
+      )
+      print(f"  [ckpt {ckpt_id}] p0 init strategy: [{p0_str}]")
+      print(f"  [ckpt {ckpt_id}] p1 init strategy: [{p1_str}]")
 
     bv = best_response_values(tree, strat0, strat1)
     # In a zero-sum game: NashConv = gain from p0 deviating + gain from p1 deviating.
