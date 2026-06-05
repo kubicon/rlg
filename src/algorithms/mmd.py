@@ -19,6 +19,8 @@ Both are stored in TrainingState.extras:
 
 from __future__ import annotations
 
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 import jax.lax as lax
@@ -32,7 +34,7 @@ from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
-from .types import LossType, MagnetUpdateType
+from .types import LossType, MagnetUpdateType, MMD_SCHEDULABLE
 
 
 class MMD(PPOBase):
@@ -76,6 +78,7 @@ class MMD(PPOBase):
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
     alternating: bool = False,
+    schedules: dict[str, Callable[[int], float]] | None = None,
   ) -> None:
     super().__init__(
       env,
@@ -103,6 +106,11 @@ class MMD(PPOBase):
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
     self.alternating = alternating
+    schedules = schedules or {}
+    unknown = set(schedules) - MMD_SCHEDULABLE
+    if unknown:
+      raise ValueError(f"Unknown schedule keys: {unknown}. Valid keys: {MMD_SCHEDULABLE}")
+    self.schedules = schedules
 
   # ── Init ──────────────────────────────────────────────────────────────────
 
@@ -121,6 +129,20 @@ class MMD(PPOBase):
   # ── Public step ───────────────────────────────────────────────────────────
 
   def step(self, state: TrainingState) -> tuple[TrainingState, dict[str, jax.Array]]:
+    def _get(name: str, default):
+      s = self.schedules.get(name)
+      return s(state.step) if s is not None else default
+
+    clip_eps        = _get("clip_eps",        self.clip_eps)
+    vf_coef         = _get("vf_coef",         self.vf_coef)
+    ent_coef        = _get("ent_coef",         self.ent_coef)
+    magnet_coef     = _get("magnet_coef",     self.magnet_coef)
+    old_policy_coef = _get("old_policy_coef", self.old_policy_coef)
+    target_update_rate = _get("target_update_rate", self.target_update_rate)
+    magnet_update_rate = _get("magnet_update_rate", self.magnet_update_rate)
+    neurd_clip      = _get("neurd_clip",      self.neurd_clip)
+    neurd_threshold = _get("neurd_threshold", self.neurd_threshold)
+
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
       self.env, self.agent, state.params, collect_key, self.batch_size
@@ -169,11 +191,11 @@ class MMD(PPOBase):
             magnet_logits,
             advantages,
             targets,
-            self.clip_eps,
-            self.vf_coef,
-            self.ent_coef,
-            self.magnet_coef,
-            self.old_policy_coef,
+            clip_eps,
+            vf_coef,
+            ent_coef,
+            magnet_coef,
+            old_policy_coef,
           )
         elif self.loss_type == LossType.RNAD:
           _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
@@ -190,12 +212,12 @@ class MMD(PPOBase):
             magnet_logits,
             advantages,
             targets,
-            self.clip_eps,
-            self.vf_coef,
-            self.ent_coef,
-            self.magnet_coef,
-            self.neurd_clip,
-            self.neurd_threshold,
+            clip_eps,
+            vf_coef,
+            ent_coef,
+            magnet_coef,
+            neurd_clip,
+            neurd_threshold,
           )
         if self.alternating:
           wmean = lambda x: self._wmean(x * player_mask, valid)
@@ -213,11 +235,11 @@ class MMD(PPOBase):
 
     # Polyak update: target ← τ·params + (1−τ)·target
     target_params = optax.incremental_update(
-      params, state.extras["target_params"], self.target_update_rate
+      params, state.extras["target_params"], target_update_rate
     )
     if self.magnet_update_type == MagnetUpdateType.INCREMENTAL:
       magnet_params = optax.incremental_update(
-        params, state.extras["magnet_params"], self.magnet_update_rate
+        params, state.extras["magnet_params"], magnet_update_rate
       )
     else:
       magnet_params = optax.periodic_update(

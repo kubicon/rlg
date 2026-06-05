@@ -1,0 +1,56 @@
+seed: 0
+env:
+  name: leduc
+  reward_type: difference
+algorithm:
+  type: mmd
+  n_epochs: 1
+  batch_size: 8192
+  optimizer:
+    type: adam
+    lr: 0.0003
+  clip_eps: 0.1
+  vf_coef: 0.5
+  ent_coef: 0.05
+  gamma: 1.0
+  gae_lambda: 0.95
+  delta_clip: 1.0
+  trace_clip: 1.0
+  magnet_coef: 0.2
+  old_policy_coef: 0.05
+  target_update_rate: 0.001
+  magnet_update_rate: 0.0005
+  magnet_update_type: incremental
+  loss_type: mmd
+  neurd_clip: 5.0
+  neurd_threshold: 3.0
+  schedules:
+    ent_coef:
+      type: exponential_decay
+      init_value: 0.05
+      transition_steps: 2000000
+      decay_rate: 0.02  # init_value * decay_rate = end_value (0.05 * 0.02 = 0.001)
+      end_value: 0.001
+  agent:
+    type: actor_critic
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden:
+          - 128
+          - 128
+        activation: gelu
+        norm: rms
+      head1:
+        type: categorical
+        n_actions: null
+      head2:
+        type: value
+trainer:
+  n_steps: 2000000
+  log_every: 1000
+  checkpoint_every: 10000
+  checkpoint_dir: experiments/mmd_leduc_ent_schedule
+  save_metrics: true

@@ -60,6 +60,25 @@ _OPTIMIZERS = {
 }
 
 
+_SCHEDULES = {
+  "cosine_decay":      lambda c: optax.cosine_decay_schedule(c["init_value"], c["decay_steps"], alpha=c.get("alpha", 0.0)),
+  "linear":            lambda c: optax.linear_schedule(c["init_value"], c["end_value"], c["transition_steps"]),
+  "polynomial":        lambda c: optax.polynomial_schedule(c["init_value"], c["end_value"], c["power"], c["transition_steps"]),
+  "exponential_decay": lambda c: optax.exponential_decay(c["init_value"], c["transition_steps"], c["decay_rate"], end_value=c.get("end_value", 0.0)),
+  "constant":          lambda c: optax.constant_schedule(c["value"]),
+}
+
+
+def build_schedules(schedules_cfg: dict) -> dict:
+  out = {}
+  for key, spec in schedules_cfg.items():
+    stype = spec["type"]
+    if stype not in _SCHEDULES:
+      raise ValueError(f"Unknown schedule type '{stype}'. Choose from: {list(_SCHEDULES)}")
+    out[key] = _SCHEDULES[stype](spec)
+  return out
+
+
 def build_optimizer(opt_cfg: dict) -> optax.GradientTransformation:
   opt_type = opt_cfg.get("type", "adam").lower()
   if opt_type not in _OPTIMIZERS:
@@ -141,7 +160,9 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
 
   opt_cfg = alg_cfg.pop("optimizer", None)
   optimizer = build_optimizer(opt_cfg) if opt_cfg is not None else None
-  algorithm = _ALGORITHMS[alg_type](env=env, agent=agent, optimizer=optimizer, **alg_cfg)
+  schedules_cfg = alg_cfg.pop("schedules", None)
+  schedules = build_schedules(schedules_cfg) if schedules_cfg else {}
+  algorithm = _ALGORITHMS[alg_type](env=env, agent=agent, optimizer=optimizer, schedules=schedules, **alg_cfg)
   print(
     f"algorithm: {alg_type.upper()}"
     f" | rollout={env.max_length}×{env.num_players} players"
