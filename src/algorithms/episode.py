@@ -58,9 +58,20 @@ def importance_weights(
   quantity is 1 when on-policy (μ = π_old, e.g. epsilon=0). vmap over the batch
   axis to apply to a batch of trajectories.
 
+  In a simultaneous-move game the transition at step t (reward and next state)
+  is determined by the JOINT action of all players, so its off-policy correction
+  is the product over players of π_old/μ — not the per-player ratio. The acting
+  player's own factor pairs with its score function ∇log π in the policy loss;
+  the remaining (opponent) factors correct the realised return for the opponents'
+  exploratory draws. Non-acting players in sequential games have a single forced
+  legal action, so their per-player ratio is exactly 1 and the joint product is
+  correct for sequential games too — no acting-player mask required.
+
   Returns:
-    is_ratio:     (T, P) — per-step action ratio π_old(a)/μ(a). Serves as the
-                  forward vtrace correction and the local policy-gradient factor.
+    joint_ratio:  (T,)   — per-step JOINT action ratio ∏_p π_old(a_p)/μ(a_p).
+                  Serves as the forward vtrace correction (transition) and, with
+                  the score function supplying its own factor, the local
+                  policy-gradient factor.
     reach_weight: (T,)   — unclipped joint (all-players) exclusive prefix product
                   of π_old/μ: the probability of reaching each timestep under
                   π_old relative to μ (the backward / reach correction).
@@ -73,14 +84,14 @@ def importance_weights(
   )[..., 0]  # log π_old(a) (T, P)
 
   log_ratio = pi_old_logp - behavior_logp  # (T, P)
-  is_ratio = jnp.exp(log_ratio)  # π_old/μ
 
-  joint_log_ratio = log_ratio.sum(-1)  # (T,) — sum over players
+  joint_log_ratio = log_ratio.sum(-1)  # (T,) — sum over players (joint action)
+  joint_ratio = jnp.exp(joint_log_ratio)  # (T,) — ∏_p π_old/μ
   reach_log = jnp.cumulative_sum(
     joint_log_ratio, axis=0, include_initial=True
   )[:-1]  # exclusive prefix
   reach_weight = jnp.exp(reach_log)  # (T,)
-  return is_ratio, reach_weight
+  return joint_ratio, reach_weight
 
 
 def collect_episodes(

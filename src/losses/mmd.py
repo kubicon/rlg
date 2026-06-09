@@ -31,9 +31,13 @@ def mmd_loss(
 
   # advantages = advantages - magnet_coef *( log_prob - magnet_log_prob)
 
-  # local_ratio = π_old(a)/μ(a) corrects the off-policy action draw at this node
-  # (1.0 when on-policy). The trust-region ratio inside ppo_policy_loss stays
-  # π/π_old; this factor multiplies the surrogate to keep the gradient unbiased.
+  # local_ratio = ∏_p π_old(a_p)/μ(a_p) is the JOINT off-policy correction for
+  # the draw at this node (1.0 when on-policy). The transition depends on every
+  # player's action, so the joint ratio is needed; the trust-region ratio inside
+  # ppo_policy_loss stays π/π_old (the acting player's own score function), and
+  # this factor multiplies the surrogate to keep the gradient unbiased — the
+  # acting player's own ratio pairs with ∇log π, the opponents' ratios correct
+  # the realised advantage for their exploratory draws.
   policy_loss = local_ratio * ppo_policy_loss(log_prob, sample_log_prob, advantages, clip_eps)
   value_loss = ppo_value_loss(values, sample_values, returns, clip_eps)
   magnet_loss = kl_divergence(log_probs_all, magnet_log_probs_all)

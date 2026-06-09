@@ -165,16 +165,23 @@ class MMD(PPOBase):
     magnet_logits = lax.stop_gradient(magnet_out.logits)  # (B, T, P, A)
 
     # ── Off-policy importance weights (vmapped over the batch) ─────────────────
-    # is_ratio (B,T,P): forward (vtrace) + local action correction π_old/μ.
+    # joint_ratio (B,T): per-step JOINT action ratio ∏_p π_old/μ — the forward
+    #   (vtrace) transition correction and the local policy-gradient factor. In a
+    #   simultaneous-move game the transition depends on every player's action, so
+    #   the correction must be joint, not per-player; the score function ∇log π_i
+    #   supplies player i's own factor and joint_ratio carries the opponents'.
     # reach_weight (B,T): backward / reach correction (relative state-visitation).
-    is_ratio, reach_weight = jax.vmap(importance_weights)(
+    joint_ratio, reach_weight = jax.vmap(importance_weights)(
       episodes.behavior_log_probs,
       episodes.agent_output.logits,
       episodes.legal_actions,
       episodes.actions,
     )
-    is_ratio = lax.stop_gradient(is_ratio)
+    joint_ratio = lax.stop_gradient(joint_ratio)
     reach_weight = lax.stop_gradient(reach_weight)
+    # Broadcast the per-step joint ratio over the player axis (B,T) → (B,T,P): the
+    # transition correction is shared by all players at a step.
+    joint_ratio_p = jnp.broadcast_to(joint_ratio[..., None], episodes.rewards.shape)
 
     # log μ(a) of the taken action — used by the RNAD baseline IS divisor.
     behavior_logp = lax.stop_gradient(
@@ -184,25 +191,28 @@ class MMD(PPOBase):
     )  # (B,T,P)
 
     # Use target values for GAE bootstrapping (stable value estimates).
-    # is_ratio supplies the forward off-policy correction (clipped inside vtrace).
+    # joint_ratio supplies the forward off-policy correction (clipped inside
+    # vtrace): the transition depends on the joint action, so the joint ratio is
+    # the correct per-step IS weight for the reward and bootstrap.
     advantages, targets = self._compute_advantages(
-      episodes.rewards, target_values, episodes.dones, is_ratio
+      episodes.rewards, target_values, episodes.dones, joint_ratio_p
     )
 
     # Strip the double-counted step-t action correction from the policy-gradient
-    # advantage. vtrace bakes ρ_t = min(delta_clip, π_old/μ) into the leading TD
-    # term (advantage.py), and the MMD policy loss multiplies the advantage by
-    # the explicit local action ratio π_old/μ again — so at ε>0 the action of
-    # step t is corrected twice. Add back (1 − ρ_t)·raw_td_t to cancel the
-    # leading ρ_t, leaving the future (λ, clipping) correction untouched. The
-    # value loss keeps the unmodified vtrace targets. At ε=0, ρ_t = 1 so this is
-    # an exact no-op and on-policy (GAE) behavior is preserved.
+    # advantage. vtrace bakes ρ_t = min(delta_clip, joint π_old/μ) into the
+    # leading TD term (advantage.py), and the MMD policy loss multiplies the
+    # advantage by the explicit local joint ratio π_old/μ again — so at ε>0 the
+    # joint action of step t is corrected twice. Add back (1 − ρ_t)·raw_td_t to
+    # cancel the leading ρ_t, so the leading policy-gradient term is exactly
+    # joint_ratio·raw_td_t, leaving the future (λ, clipping) correction
+    # untouched. The value loss keeps the unmodified vtrace targets. At ε=0,
+    # ρ_t = 1 so this is an exact no-op and on-policy (GAE) behavior is preserved.
     discount = (1.0 - episodes.dones) * self.gamma  # (B,T)
     v_next = jnp.concatenate(
       [target_values[:, 1:], jnp.zeros_like(target_values[:, :1])], axis=1
     )  # bootstrap 0 past episode end — matches vtrace's bootstrap_value=0
     raw_td = episodes.rewards + discount[..., None] * v_next - target_values  # (B,T,P)
-    clipped_delta_ratio = jnp.minimum(self.delta_clip, is_ratio)  # (B,T,P)
+    clipped_delta_ratio = jnp.minimum(self.delta_clip, joint_ratio_p)  # (B,T,P)
     pg_advantages = advantages + (1.0 - clipped_delta_ratio) * raw_td
 
     params, opt_state = state.params, state.opt_state
@@ -236,7 +246,7 @@ class MMD(PPOBase):
             magnet_logits,
             pg_advantages,  # ρ_t-stripped advantage (no double action correction)
             targets,
-            is_ratio,  # local action correction π_old/μ
+            joint_ratio_p,  # local joint action correction ∏_p π_old/μ
             clip_eps,
             vf_coef,
             ent_coef,
