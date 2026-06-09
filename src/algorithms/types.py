@@ -17,4 +17,5 @@ MMD_SCHEDULABLE = frozenset({
   "magnet_coef", "old_policy_coef",
   "target_update_rate", "magnet_update_rate",
   "neurd_clip", "neurd_threshold",
+  "epsilon",
 })
