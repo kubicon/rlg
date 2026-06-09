@@ -49,5 +49,5 @@ trainer:
   n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/epsilon_leduc
+  checkpoint_dir: public_experiments/off_policy/leduc
   save_metrics: true
