@@ -189,6 +189,22 @@ class MMD(PPOBase):
       episodes.rewards, target_values, episodes.dones, is_ratio
     )
 
+    # Strip the double-counted step-t action correction from the policy-gradient
+    # advantage. vtrace bakes ρ_t = min(delta_clip, π_old/μ) into the leading TD
+    # term (advantage.py), and the MMD policy loss multiplies the advantage by
+    # the explicit local action ratio π_old/μ again — so at ε>0 the action of
+    # step t is corrected twice. Add back (1 − ρ_t)·raw_td_t to cancel the
+    # leading ρ_t, leaving the future (λ, clipping) correction untouched. The
+    # value loss keeps the unmodified vtrace targets. At ε=0, ρ_t = 1 so this is
+    # an exact no-op and on-policy (GAE) behavior is preserved.
+    discount = (1.0 - episodes.dones) * self.gamma  # (B,T)
+    v_next = jnp.concatenate(
+      [target_values[:, 1:], jnp.zeros_like(target_values[:, :1])], axis=1
+    )  # bootstrap 0 past episode end — matches vtrace's bootstrap_value=0
+    raw_td = episodes.rewards + discount[..., None] * v_next - target_values  # (B,T,P)
+    clipped_delta_ratio = jnp.minimum(self.delta_clip, is_ratio)  # (B,T,P)
+    pg_advantages = advantages + (1.0 - clipped_delta_ratio) * raw_td
+
     params, opt_state = state.params, state.opt_state
     valid = self._valid_mask(episodes.dones)
 
@@ -218,7 +234,7 @@ class MMD(PPOBase):
             episodes.agent_output.logits,  # trajectory sampling policy (π_old)
             episodes.agent_output.value,
             magnet_logits,
-            advantages,
+            pg_advantages,  # ρ_t-stripped advantage (no double action correction)
             targets,
             is_ratio,  # local action correction π_old/μ
             clip_eps,
