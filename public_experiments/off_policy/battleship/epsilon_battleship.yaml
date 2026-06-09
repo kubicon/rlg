@@ -52,5 +52,5 @@ trainer:
   n_steps: 100000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/epsilon_battleship
+  checkpoint_dir: public_experiments/off_policy/battleship
   save_metrics: true
