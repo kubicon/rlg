@@ -29,7 +29,7 @@ import optax
 from ..losses.rnad import rnad_loss
 
 from .base import TrainingState
-from .episode import collect_episodes, importance_weights
+from .episode import collect_episodes
 from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
@@ -50,11 +50,6 @@ class MMD(PPOBase):
       magnet_interval:         Steps between hard resets (used when magnet_update_type=periodic).
       magnet_update_rate:      Polyak τ for magnet update (used when magnet_update_type=incremental).
       magnet_update_type:      "periodic" (hard reset every k steps) or "incremental" (Polyak).
-      epsilon:                 Off-policy exploration. Actions are sampled from
-                               μ = (1−ε)·π + ε·Uniform(legal). ε=0 is on-policy;
-                               ε=1 samples uniformly. ε>0 enables importance-
-                               sampling corrections (forward vtrace ratio +
-                               unclipped reach weight + local action ratio).
   """
 
   def __init__(
@@ -83,7 +78,6 @@ class MMD(PPOBase):
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
     alternating: bool = False,
-    epsilon: float = 0.0,
     schedules: dict[str, Callable[[int], float]] | None = None,
   ) -> None:
     super().__init__(
@@ -112,7 +106,6 @@ class MMD(PPOBase):
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
     self.alternating = alternating
-    self.epsilon = epsilon
     schedules = schedules or {}
     unknown = set(schedules) - MMD_SCHEDULABLE
     if unknown:
@@ -149,12 +142,10 @@ class MMD(PPOBase):
     magnet_update_rate = _get("magnet_update_rate", self.magnet_update_rate)
     neurd_clip      = _get("neurd_clip",      self.neurd_clip)
     neurd_threshold = _get("neurd_threshold", self.neurd_threshold)
-    epsilon         = _get("epsilon",         self.epsilon)
 
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
-      self.env, self.agent, state.params, collect_key, self.batch_size,
-      epsilon=epsilon,
+      self.env, self.agent, state.params, collect_key, self.batch_size
     )
 
     # Both auxiliary networks are fixed across all epochs — precompute once.
@@ -164,56 +155,10 @@ class MMD(PPOBase):
     magnet_out = self._eval_params(state.extras["magnet_params"], episodes)
     magnet_logits = lax.stop_gradient(magnet_out.logits)  # (B, T, P, A)
 
-    # ── Off-policy importance weights (vmapped over the batch) ─────────────────
-    # joint_ratio (B,T): per-step JOINT action ratio ∏_p π_old/μ — the forward
-    #   (vtrace) transition correction and the local policy-gradient factor. In a
-    #   simultaneous-move game the transition depends on every player's action, so
-    #   the correction must be joint, not per-player; the score function ∇log π_i
-    #   supplies player i's own factor and joint_ratio carries the opponents'.
-    # reach_weight (B,T): backward / reach correction (relative state-visitation).
-    joint_ratio, reach_weight = jax.vmap(importance_weights)(
-      episodes.behavior_log_probs,
-      episodes.agent_output.logits,
-      episodes.legal_actions,
-      episodes.actions,
-    )
-    joint_ratio = lax.stop_gradient(joint_ratio)
-    reach_weight = lax.stop_gradient(reach_weight)
-    # Broadcast the per-step joint ratio over the player axis (B,T) → (B,T,P): the
-    # transition correction is shared by all players at a step.
-    joint_ratio_p = jnp.broadcast_to(joint_ratio[..., None], episodes.rewards.shape)
-
-    # log μ(a) of the taken action — used by the RNAD baseline IS divisor.
-    behavior_logp = lax.stop_gradient(
-      jnp.take_along_axis(
-        episodes.behavior_log_probs, episodes.actions[..., None], axis=-1
-      )[..., 0]
-    )  # (B,T,P)
-
     # Use target values for GAE bootstrapping (stable value estimates).
-    # joint_ratio supplies the forward off-policy correction (clipped inside
-    # vtrace): the transition depends on the joint action, so the joint ratio is
-    # the correct per-step IS weight for the reward and bootstrap.
     advantages, targets = self._compute_advantages(
-      episodes.rewards, target_values, episodes.dones, joint_ratio_p
+      episodes.rewards, target_values, episodes.dones
     )
-
-    # Strip the double-counted step-t action correction from the policy-gradient
-    # advantage. vtrace bakes ρ_t = min(delta_clip, joint π_old/μ) into the
-    # leading TD term (advantage.py), and the MMD policy loss multiplies the
-    # advantage by the explicit local joint ratio π_old/μ again — so at ε>0 the
-    # joint action of step t is corrected twice. Add back (1 − ρ_t)·raw_td_t to
-    # cancel the leading ρ_t, so the leading policy-gradient term is exactly
-    # joint_ratio·raw_td_t, leaving the future (λ, clipping) correction
-    # untouched. The value loss keeps the unmodified vtrace targets. At ε=0,
-    # ρ_t = 1 so this is an exact no-op and on-policy (GAE) behavior is preserved.
-    discount = (1.0 - episodes.dones) * self.gamma  # (B,T)
-    v_next = jnp.concatenate(
-      [target_values[:, 1:], jnp.zeros_like(target_values[:, :1])], axis=1
-    )  # bootstrap 0 past episode end — matches vtrace's bootstrap_value=0
-    raw_td = episodes.rewards + discount[..., None] * v_next - target_values  # (B,T,P)
-    clipped_delta_ratio = jnp.minimum(self.delta_clip, joint_ratio_p)  # (B,T,P)
-    pg_advantages = advantages + (1.0 - clipped_delta_ratio) * raw_td
 
     params, opt_state = state.params, state.opt_state
     valid = self._valid_mask(episodes.dones)
@@ -232,7 +177,7 @@ class MMD(PPOBase):
         agent_out = self._eval_params(params, episodes)
 
         if self.loss_type == LossType.MMD:
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
           loss_P = jax.vmap(mmd_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -241,12 +186,11 @@ class MMD(PPOBase):
             agent_out.logits,
             episodes.legal_actions,
             episodes.actions,
-            episodes.agent_output.logits,  # trajectory sampling policy (π_old)
+            episodes.agent_output.logits,  # trajectory sampling policy
             episodes.agent_output.value,
             magnet_logits,
-            pg_advantages,  # ρ_t-stripped advantage (no double action correction)
+            advantages,
             targets,
-            joint_ratio_p,  # local joint action correction ∏_p π_old/μ
             clip_eps,
             vf_coef,
             ent_coef,
@@ -254,7 +198,7 @@ class MMD(PPOBase):
             old_policy_coef,
           )
         elif self.loss_type == LossType.RNAD:
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
           loss_P = jax.vmap(rnad_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -263,12 +207,11 @@ class MMD(PPOBase):
             agent_out.logits,
             episodes.legal_actions,
             episodes.actions,
-            episodes.agent_output.logits,  # trajectory sampling policy (π_old)
+            episodes.agent_output.logits,  # trajectory sampling policy
             episodes.agent_output.value,
             magnet_logits,
             advantages,
             targets,
-            behavior_logp,  # log μ(a) for the baseline IS divisor
             clip_eps,
             vf_coef,
             ent_coef,
@@ -276,15 +219,10 @@ class MMD(PPOBase):
             neurd_clip,
             neurd_threshold,
           )
-        # Reach correction: weight every per-node term by the (B,T) reach ratio.
-        # Applied as a multiplicative weight on the losses while _wmean still
-        # normalises by the valid-step count, so this is an honest (not self-
-        # normalised) importance estimator.
-        rw = reach_weight[..., None]  # (B,T,1) — broadcast over players
         if self.alternating:
-          wmean = lambda x: self._wmean(x * player_mask * rw, valid)
+          wmean = lambda x: self._wmean(x * player_mask, valid)
         else:
-          wmean = lambda x: self._wmean(x * rw, valid)
+          wmean = lambda x: self._wmean(x, valid)
         return wmean(losses), jax.tree.map(wmean, metrics)  # type: ignore
 
       (_, metrics), grads = jax.value_and_grad(total_loss, has_aux=True)(params)

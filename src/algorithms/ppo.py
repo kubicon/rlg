@@ -96,31 +96,24 @@ class PPOBase(Algorithm):
     rewards: jax.Array,  # (B, T, P)
     values: jax.Array,  # (B, T, P)
     dones: jax.Array,  # (B, T)
-    importance_sampling: jax.Array | float = 1.0,  # () or (B, T, P)
   ) -> tuple[jax.Array, jax.Array]:
-    """Returns (advantages, targets) both shaped (B, T, P).
-
-    importance_sampling is the per-step ratio π/μ for off-policy (forward)
-    vtrace correction; it is clipped internally by delta_clip/trace_clip.
-    Defaults to 1.0 (on-policy), broadcast to (B, T, P).
-    """
+    """Returns (advantages, targets) both shaped (B, T, P)."""
     discount = (1.0 - dones) * self.gamma  # (B, T)
-    importance_sampling = jnp.broadcast_to(importance_sampling, rewards.shape)
 
     vtrace_P = jax.vmap(
       vtrace,
-      in_axes=(-1, -1, None, -1, None, None, None, None),
+      in_axes=(-1, -1, None, None, None, None, None, None),
       out_axes=(-1, -1),
     )
     vtrace_BP = jax.vmap(
       vtrace_P,
-      in_axes=(0, 0, 0, 0, None, None, None, None),
+      in_axes=(0, 0, 0, None, None, None, None, None),
     )
     targets, advantages = vtrace_BP(
       rewards,
       values,
       discount,
-      importance_sampling,
+      1.0,
       0.0,
       self.gae_lambda,
       self.delta_clip,

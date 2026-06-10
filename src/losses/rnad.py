@@ -15,17 +15,14 @@ def estimate_baseline_regrets(
   value: jax.Array,
   advanatge: jax.Array,
   strategy: jax.Array,
-  behavior_prob: jax.Array,
+  sampling_strategy: jax.Array,
   action: jax.Array,
 ) -> jax.Array:
   # Taken from https://arxiv.org/abs/1809.03057
   # Baseline + (Utility - Baseline)/pi. Advantage is basically Utility-baseline.
-  # The divisor is the *behavior* (sampling) probability μ(a) of the taken
-  # action — this is the importance-sampling correction for off-policy draws.
-  # On-policy (epsilon=0) it equals the rollout policy probability of the action.
   q_values = value + jax.nn.one_hot(
     action, value.shape[-1]
-  ) * advanatge / behavior_prob
+  ) * advanatge / jnp.take_along_axis(sampling_strategy, action[None], axis=-1)
   regrets = q_values - jnp.sum(q_values * strategy, axis=-1, keepdims=True)
   return regrets
 
@@ -40,7 +37,6 @@ def rnad_loss(
   magnet_logits: jax.Array,
   advantages: jax.Array,
   returns: jax.Array,
-  behavior_log_prob: jax.Array,
   clip_eps: float,
   vf_coef: float,
   ent_coef: float,
@@ -51,15 +47,14 @@ def rnad_loss(
   log_probs_all = safe_log_softmax(logits, legal_actions)
   strategy = jax.nn.softmax(logits, where=legal_actions)
   magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
+  sampling_strategy = jax.nn.softmax(sample_logits, where=legal_actions)
 
   regularized_value = values - rnad_regularization(
     log_probs_all, magnet_log_probs_all, magnet_coef
   )
 
-  # behavior_log_prob = log μ(a) of the taken action (the sampling policy).
-  behavior_prob = jnp.exp(behavior_log_prob)
   regrets = estimate_baseline_regrets(
-    regularized_value, advantages, strategy, behavior_prob, actions
+    regularized_value, advantages, strategy, sampling_strategy, actions
   )
 
   policy_loss = -neurd_loss(logits, legal_actions, regrets, neurd_clip, neurd_threshold)

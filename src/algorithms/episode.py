@@ -18,7 +18,6 @@ import jax.numpy as jnp
 
 from ..agents.base import Agent
 from ..envs.base import Env, EnvState
-from ..utils import safe_log_softmax
 
 
 class Episode(NamedTuple):
@@ -39,59 +38,6 @@ class Episode(NamedTuple):
   rewards: jax.Array     # (T, P)     — per-player rewards
   actions: jax.Array     # (T, P)     — 0-indexed sampled actions
   agent_output: Any      # (T, P, ...) — full agent evaluate output
-  behavior_log_probs: jax.Array  # (T, P, A) — log μ(·), behavior (sampling)
-                                 # policy NORMALISED log-probs over all actions
-                                 # (logsumexp over legal = 0; −inf on illegal).
-                                 # Not raw logits: gather directly for log μ(a).
-
-
-def importance_weights(
-  behavior_log_probs: jax.Array,  # (T, P, A) — log μ(·), behavior policy
-  logits: jax.Array,              # (T, P, A) — raw π_old logits
-  legal_actions: jax.Array,       # (T, P, A)
-  actions: jax.Array,             # (T, P)
-) -> tuple[jax.Array, jax.Array]:
-  """Off-policy importance weights for a single trajectory.
-
-  Relates the trajectory-sampling behavior policy μ to the on-policy π_old that
-  produced the logits. Computed in log-space for numerical stability; every
-  quantity is 1 when on-policy (μ = π_old, e.g. epsilon=0). vmap over the batch
-  axis to apply to a batch of trajectories.
-
-  In a simultaneous-move game the transition at step t (reward and next state)
-  is determined by the JOINT action of all players, so its off-policy correction
-  is the product over players of π_old/μ — not the per-player ratio. The acting
-  player's own factor pairs with its score function ∇log π in the policy loss;
-  the remaining (opponent) factors correct the realised return for the opponents'
-  exploratory draws. Non-acting players in sequential games have a single forced
-  legal action, so their per-player ratio is exactly 1 and the joint product is
-  correct for sequential games too — no acting-player mask required.
-
-  Returns:
-    joint_ratio:  (T,)   — per-step JOINT action ratio ∏_p π_old(a_p)/μ(a_p).
-                  Serves as the forward vtrace correction (transition) and, with
-                  the score function supplying its own factor, the local
-                  policy-gradient factor.
-    reach_weight: (T,)   — unclipped joint (all-players) exclusive prefix product
-                  of π_old/μ: the probability of reaching each timestep under
-                  π_old relative to μ (the backward / reach correction).
-  """
-  behavior_logp = jnp.take_along_axis(
-    behavior_log_probs, actions[..., None], axis=-1
-  )[..., 0]  # log μ(a) of the taken action (T, P)
-  pi_old_logp = jnp.take_along_axis(
-    safe_log_softmax(logits, legal_actions), actions[..., None], axis=-1
-  )[..., 0]  # log π_old(a) (T, P)
-
-  log_ratio = pi_old_logp - behavior_logp  # (T, P)
-
-  joint_log_ratio = log_ratio.sum(-1)  # (T,) — sum over players (joint action)
-  joint_ratio = jnp.exp(joint_log_ratio)  # (T,) — ∏_p π_old/μ
-  reach_log = jnp.cumulative_sum(
-    joint_log_ratio, axis=0, include_initial=True
-  )[:-1]  # exclusive prefix
-  reach_weight = jnp.exp(reach_log)  # (T,)
-  return joint_ratio, reach_weight
 
 
 def collect_episodes(
@@ -103,22 +49,17 @@ def collect_episodes(
   normalize_rewards: bool = True,
   opp_params: Any = None,
   br_player: int | None = None,
-  epsilon: float | jax.Array = 0.0,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect a batch of episodes from the environment.
 
   When opp_params and br_player are given, params is used only for br_player
   and opp_params drives all other players (best-response mode).
-
-  epsilon controls off-policy exploration: actions are sampled from the mixture
-  behavior policy μ = (1 - epsilon)·π + epsilon·Uniform(legal). epsilon=0 is
-  on-policy (μ = π); epsilon=1 samples uniformly over legal actions.
   """
   rng = jax.random.split(rng, batch_size)
   return jax.vmap(
     collect_episode,
-    in_axes=(None, None, None, 0, None, None, None, None, None, None, None),
-  )(env, agent, params, rng, None, None, None, normalize_rewards, opp_params, br_player, epsilon)
+    in_axes=(None, None, None, 0, None, None, None, None, None, None),
+  )(env, agent, params, rng, None, None, None, normalize_rewards, opp_params, br_player)
 
 
 def collect_episodes_br(
@@ -155,7 +96,6 @@ def collect_episode(
   normalize_rewards: bool = True,
   opp_params: Any = None,
   br_player: int | None = None,
-  epsilon: float | jax.Array = 0.0,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect rollout_len steps from env under the current policy.
 
@@ -235,23 +175,8 @@ def collect_episode(
       mixed_logits = jnp.where(is_br[:, None], agent_out.logits, opp_out.logits)
       logits_masked = jnp.where(legal_actions, mixed_logits, -jnp.inf)
 
-    # Behavior policy μ = (1 - epsilon)·π + epsilon·Uniform(legal). Sample from μ
-    # and store its full NORMALISED log-probs (log μ over all actions) so the
-    # algorithm can apply importance-sampling corrections — the per-action
-    # log-prob is recovered by gathering at the taken action when needed. At
-    # epsilon=0, μ = π and the log-probs equal log_softmax(logits_masked) (up to
-    # a constant shift, to which categorical sampling is invariant), reproducing
-    # on-policy sampling exactly.
-    pi = jax.nn.softmax(logits_masked, axis=-1)  # (P, A), 0 on illegal
-    n_legal = legal_actions.sum(-1, keepdims=True)
-    uniform = legal_actions / n_legal  # (P, A), uniform over legal actions
-    mu = (1.0 - epsilon) * pi + epsilon * uniform  # (P, A)
-    behavior_log_probs = jnp.where(
-      legal_actions, jnp.log(jnp.where(legal_actions, mu, 1.0)), -jnp.inf
-    )  # (P, A) — log μ(·), normalised (logsumexp over legal = 0)
-
     player_keys = jax.random.split(act_key, P)
-    actions = jax.vmap(jax.random.categorical)(player_keys, behavior_log_probs)
+    actions = jax.vmap(jax.random.categorical)(player_keys, logits_masked)
 
     new_env_state, rewards, done, _ = env.apply_action(env_state, actions, env_key)
 
@@ -259,8 +184,7 @@ def collect_episode(
       rewards = rewards / env.max_reward
 
     step = Episode(
-      env_state, agent_state, legal_actions, infosets, state_rep, done, rewards,
-      actions, agent_out, behavior_log_probs,
+      env_state, agent_state, legal_actions, infosets, state_rep, done, rewards, actions, agent_out
     )
     return (new_env_state, new_agent_state, rng), step
 
