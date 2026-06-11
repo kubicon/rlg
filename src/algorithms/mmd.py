@@ -34,6 +34,7 @@ from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
+from ..utils import safe_log_softmax, kl_divergence
 from .types import LossType, MagnetUpdateType, MMD_SCHEDULABLE
 
 
@@ -50,6 +51,14 @@ class MMD(PPOBase):
       magnet_interval:         Steps between hard resets (used when magnet_update_type=periodic).
       magnet_update_rate:      Polyak τ for magnet update (used when magnet_update_type=incremental).
       magnet_update_type:      "periodic" (hard reset every k steps) or "incremental" (Polyak).
+      regularize_value:        If True, fold the per-node KL-to-magnet cost into
+                               the reward (RNaD reward transform) so the critic
+                               learns the regularized value V_τ and advantages
+                               carry downstream regularization (value-space /
+                               dilated regularizer). The per-step magnet term in
+                               the loss is then disabled to avoid double-counting.
+                               If False (default), the magnet acts only per-step
+                               via the loss penalty (original behaviour).
   """
 
   def __init__(
@@ -78,6 +87,7 @@ class MMD(PPOBase):
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
     alternating: bool = False,
+    regularize_value: bool = False,
     schedules: dict[str, Callable[[int], float]] | None = None,
   ) -> None:
     super().__init__(
@@ -106,6 +116,7 @@ class MMD(PPOBase):
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
     self.alternating = alternating
+    self.regularize_value = regularize_value
     schedules = schedules or {}
     unknown = set(schedules) - MMD_SCHEDULABLE
     if unknown:
@@ -155,13 +166,31 @@ class MMD(PPOBase):
     magnet_out = self._eval_params(state.extras["magnet_params"], episodes)
     magnet_logits = lax.stop_gradient(magnet_out.logits)  # (B, T, P, A)
 
+    valid = self._valid_mask(episodes.dones)
+
+    # Value-space (dilated) regularization. Fold the per-node KL-to-magnet cost
+    # into the reward (RNaD reward transform) so the critic regresses to the
+    # regularized value V_τ and the advantages carry the regularization of every
+    # downstream infoset. The matching per-step magnet term in the loss is then
+    # disabled (loss_magnet_coef = 0) so the current node is not counted twice.
+    # All quantities below are stop-gradiented (rollout + magnet policies), so no
+    # policy gradient leaks into the value target.
+    if self.regularize_value:
+      log_mu = safe_log_softmax(episodes.agent_output.logits, episodes.legal_actions)
+      log_ref = safe_log_softmax(magnet_logits, episodes.legal_actions)
+      node_kl = kl_divergence(log_mu, log_ref)  # (B, T, P) — KL(μ(·|s) ‖ π_ref)
+      rewards_eff = episodes.rewards - magnet_coef * node_kl * valid[..., None]
+      loss_magnet_coef = 0.0
+    else:
+      rewards_eff = episodes.rewards
+      loss_magnet_coef = magnet_coef
+
     # Use target values for GAE bootstrapping (stable value estimates).
     advantages, targets = self._compute_advantages(
-      episodes.rewards, target_values, episodes.dones
+      rewards_eff, target_values, episodes.dones
     )
 
     params, opt_state = state.params, state.opt_state
-    valid = self._valid_mask(episodes.dones)
 
     if self.alternating:
       n_players = self.env.num_players
@@ -194,7 +223,7 @@ class MMD(PPOBase):
             clip_eps,
             vf_coef,
             ent_coef,
-            magnet_coef,
+            loss_magnet_coef,
             old_policy_coef,
           )
         elif self.loss_type == LossType.RNAD:
@@ -215,7 +244,7 @@ class MMD(PPOBase):
             clip_eps,
             vf_coef,
             ent_coef,
-            magnet_coef,
+            loss_magnet_coef,
             neurd_clip,
             neurd_threshold,
           )
