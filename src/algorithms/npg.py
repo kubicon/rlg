@@ -16,6 +16,23 @@ mirror-descent target (see losses/npg.py):
     log π̄(·|s) = (1 − ητ)·log π_t(·|s) + ητ·log π_ref(·|s) + η·Q(s,·) − logZ
     loss       = KL(π_θ ‖ stop_grad(π̄))
 
+Value-space (dilated) regularization
+-------------------------------------
+The paper regularizes in *value* space: the regularized value (Sec. 2.2)
+sums τ·ψ(π(·|h)) over every history h in the subtree, so the cost charged at
+infoset s accounts for the regularization of all *subsequent* infosets, not
+just s itself. With ``regularize_value=True`` (default) we honour this by
+computing the Retrace bootstrap from the *soft* value
+
+    V_τ(s) = E_μ[Q(s,·)] − τ·KL(μ(·|s) ‖ π_ref(·|s)),
+
+so the Retrace return — and therefore the Q-head trained on it — carries the
+downstream regularization, and the all-action Q-vector fed into the exponent is
+the genuine soft Q_τ. The ``log π_ref`` / ``(1 − ητ)`` terms in the policy
+update cover only node s, so there is no double counting. With
+``regularize_value=False`` the bootstrap is the raw value and the regularizer
+acts only per-step (the myopic policy-space variant).
+
 No ε-truncation, no alternation, no parameter schedules — by design.
 
 Requires a Q-head agent (same as QMMD). mmd.py and mmd_q.py are untouched.
@@ -32,9 +49,11 @@ from .base import TrainingState
 from .episode import collect_episodes
 from .mmd_q import QMMD
 from .types import LossType, MagnetUpdateType
+from ..advantage import retrace
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.npg import npg_loss
+from ..utils import safe_log_softmax
 
 
 class NPG(QMMD):
@@ -54,6 +73,10 @@ class NPG(QMMD):
       magnet_update_rate:    Polyak τ for the reference policy
                              (magnet_update_type=incremental).
       magnet_update_type:    "periodic" or "incremental" reference-policy update.
+      regularize_value:      If True (default), bootstrap Retrace from the soft
+                             value so Q_τ carries downstream regularization
+                             (the paper's dilated/value-space regularizer). If
+                             False, use the raw value (myopic per-step variant).
       optimizer, grad_clip:  as in QMMD.
   """
 
@@ -74,6 +97,7 @@ class NPG(QMMD):
     magnet_interval: int = 2000,
     magnet_update_rate: float = 0.001,
     magnet_update_type: MagnetUpdateType = MagnetUpdateType.PERIODIC,
+    regularize_value: bool = True,
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
   ) -> None:
@@ -99,8 +123,50 @@ class NPG(QMMD):
     )
     self.eta = eta
     self.tau = tau
+    self.regularize_value = regularize_value
 
   # init() is inherited from QMMD: extras = {target_params, magnet_params}.
+
+  # ── Soft Q-target computation (value-space regularization) ─────────────────
+
+  def _compute_soft_q_targets(
+    self,
+    rewards: jax.Array,          # (B, T, P)
+    target_q_values: jax.Array,  # (B, T, P, A) — Polyak target-net Q
+    sample_logits: jax.Array,    # (B, T, P, A) — rollout (on-policy) policy μ
+    magnet_logits: jax.Array,    # (B, T, P, A) — reference policy π_ref
+    actions: jax.Array,          # (B, T, P)
+    legal_actions: jax.Array,    # (B, T, P, A)
+    dones: jax.Array,            # (B, T)
+    tau: float,
+  ) -> jax.Array:                # (B, T, P) — soft Q targets
+    """Retrace(λ) Q-targets bootstrapped from the *soft* value.
+
+    Identical to QMMD._compute_q_targets except the bootstrap value subtracts
+    the per-node regularization, V_τ(s) = E_μ[Q(s,·)] − τ·KL(μ(·|s) ‖ π_ref(·|s)).
+    Because Retrace recursively bootstraps V_τ, this propagates the τ·KL cost of
+    every downstream infoset into the return — the dilated/value-space
+    regularizer (paper Sec. 2.2). The node's *own* KL is not included here; it is
+    handled by the policy update's log π_ref / (1 − ητ) terms.
+    """
+    mu = jax.nn.softmax(sample_logits, where=legal_actions)        # (B,T,P,A)
+    log_mu = safe_log_softmax(sample_logits, legal_actions)        # (B,T,P,A)
+    log_ref = safe_log_softmax(magnet_logits, legal_actions)       # (B,T,P,A)
+    kl = jnp.sum(mu * (log_mu - log_ref), axis=-1)                 # (B,T,P) — KL(μ‖ref)
+
+    # Soft bootstrap value: V_τ(s) = E_μ[Q_target(s,·)] − τ·KL(μ(·|s)‖ref).
+    v_target = (mu * target_q_values).sum(-1) - tau * kl           # (B,T,P)
+
+    q_taken = jnp.take_along_axis(
+      target_q_values, actions[..., None], axis=-1
+    ).squeeze(-1)                                                  # (B,T,P)
+
+    discount = (1.0 - dones) * self.gamma                          # (B,T)
+
+    _retrace = lambda r, q, v, d: retrace(r, q, v, d, lambda_=self.gae_lambda)
+    _retrace_P = jax.vmap(_retrace, in_axes=(1, 1, 1, None), out_axes=1)
+    _retrace_BP = jax.vmap(_retrace_P, in_axes=(0, 0, 0, 0), out_axes=0)
+    return _retrace_BP(rewards, q_taken, v_target, discount)       # (B,T,P)
 
   # ── Public step ───────────────────────────────────────────────────────────
 
@@ -110,25 +176,44 @@ class NPG(QMMD):
       self.env, self.agent, state.params, collect_key, self.batch_size
     )
 
-    # ── Retrace targets: target-net Q-values, on-policy rollout policy ──────
     target_out = self._eval_params(state.extras["target_params"], episodes)
-    q_targets = lax.stop_gradient(
-      self._compute_q_targets(
-        episodes.rewards,
-        target_out.q_values,           # (B,T,P,A) — target-net Q (stability)
-        episodes.agent_output.logits,  # (B,T,P,A) — rollout (on-policy) π
-        episodes.actions,              # (B,T,P)
-        episodes.legal_actions,        # (B,T,P,A)
-        episodes.dones,                # (B,T)
-      )
-    )  # (B,T,P)
-
-    # All-action target-net Q-vector for the NPG exponent (stop-grad).
-    target_q_values = lax.stop_gradient(target_out.q_values)  # (B,T,P,A)
 
     # Reference (magnet) logits — the bidilated regularizer.
     magnet_out = self._eval_params(state.extras["magnet_params"], episodes)
     magnet_logits = lax.stop_gradient(magnet_out.logits)  # (B,T,P,A)
+
+    # ── Retrace Q-targets ──────────────────────────────────────────────────
+    # With regularize_value, the bootstrap is the *soft* value, so the Retrace
+    # return (and the Q-head it trains) carries the regularization of every
+    # downstream infoset — the paper's dilated/value-space regularizer.
+    if self.regularize_value:
+      q_targets = lax.stop_gradient(
+        self._compute_soft_q_targets(
+          episodes.rewards,
+          target_out.q_values,           # (B,T,P,A) — target-net Q (stability)
+          episodes.agent_output.logits,  # (B,T,P,A) — rollout (on-policy) μ
+          magnet_logits,                 # (B,T,P,A) — π_ref
+          episodes.actions,              # (B,T,P)
+          episodes.legal_actions,        # (B,T,P,A)
+          episodes.dones,                # (B,T)
+          self.tau,
+        )
+      )  # (B,T,P)
+    else:
+      q_targets = lax.stop_gradient(
+        self._compute_q_targets(
+          episodes.rewards,
+          target_out.q_values,
+          episodes.agent_output.logits,
+          episodes.actions,
+          episodes.legal_actions,
+          episodes.dones,
+        )
+      )  # (B,T,P)
+
+    # All-action target-net Q-vector for the NPG exponent (stop-grad). Once the
+    # Q-head is trained on the (soft) targets above, this is the soft Q_τ(s,·).
+    target_q_values = lax.stop_gradient(target_out.q_values)  # (B,T,P,A)
 
     params, opt_state = state.params, state.opt_state
     valid = self._valid_mask(episodes.dones)
