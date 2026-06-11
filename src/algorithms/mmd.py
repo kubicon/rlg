@@ -55,8 +55,11 @@ class MMD(PPOBase):
                                the reward (RNaD reward transform) so the critic
                                learns the regularized value V_τ and advantages
                                carry downstream regularization (value-space /
-                               dilated regularizer). The per-step magnet term in
-                               the loss is then disabled to avoid double-counting.
+                               dilated regularizer). Following the paper's V_τ,
+                               the value carries BOTH players' regularization
+                               (two-player zero-sum: each pays its own KL, is
+                               credited the opponent's). The per-step magnet term
+                               in the loss is disabled to avoid double-counting.
                                If False (default), the magnet acts only per-step
                                via the loss penalty (original behaviour).
   """
@@ -179,7 +182,14 @@ class MMD(PPOBase):
       log_mu = safe_log_softmax(episodes.agent_output.logits, episodes.legal_actions)
       log_ref = safe_log_softmax(magnet_logits, episodes.legal_actions)
       node_kl = kl_divergence(log_mu, log_ref)  # (B, T, P) — KL(μ(·|s) ‖ π_ref)
-      rewards_eff = episodes.rewards - magnet_coef * node_kl * valid[..., None]
+      # Two-player zero-sum regularized value Φ = V − τ·R_self + τ·R_opp: each
+      # player pays its own KL and is credited the opponents' KL, so the value
+      # carries BOTH players' regularization (paper Sec. 2.2) and stays zero-sum
+      # (Σ_p r̃_p = Σ_p r_p). total − 2·own gives (opp − own); for a single
+      # player it reduces to −own (the opponent term vanishes).
+      total_kl = node_kl.sum(axis=-1, keepdims=True)       # (B, T, 1) — Σ_p KL_p
+      reg = magnet_coef * (2.0 * node_kl - total_kl)        # τ·(own − opp) per player
+      rewards_eff = episodes.rewards - reg * valid[..., None]
       loss_magnet_coef = 0.0
     else:
       rewards_eff = episodes.rewards
