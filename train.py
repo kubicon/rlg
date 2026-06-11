@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 import os
 import glob
+import inspect
 import pickle
 import sys
 import yaml
@@ -30,6 +31,7 @@ from src.agents.actor_critic import (
 from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
 from src.algorithms.mmd_q import QMMD
+from src.algorithms.npg import NPG
 from src.trainers.trainer import StandardTrainer, StdoutLogger
 from opt_muon import optimistic_muon
 
@@ -38,6 +40,7 @@ _ALGORITHMS = {
   "ppo": PPO,
   "mmd": MMD,
   "qmmd": QMMD,
+  "npg": NPG,
 }
 
 _AGENT_CLASSES = {
@@ -50,6 +53,7 @@ _AGENT_CLASSES = {
   "ppo": ActorCriticAgent,
   "mmd": ActorCriticAgent,
   "qmmd": PolicyQAgent,
+  "npg": PolicyQAgent,
 }
 
 _OPTIMIZERS = {
@@ -165,7 +169,13 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
   optimizer = build_optimizer(opt_cfg) if opt_cfg is not None else None
   schedules_cfg = alg_cfg.pop("schedules", None)
   schedules = build_schedules(schedules_cfg) if schedules_cfg else {}
-  algorithm = _ALGORITHMS[alg_type](env=env, agent=agent, optimizer=optimizer, schedules=schedules, **alg_cfg)
+  alg_class = _ALGORITHMS[alg_type]
+  # Some algorithms (e.g. NPG) are schedule-free and do not accept `schedules`.
+  if "schedules" in inspect.signature(alg_class.__init__).parameters:
+    alg_cfg["schedules"] = schedules
+  elif schedules:
+    raise ValueError(f"Algorithm '{alg_type}' does not support schedules.")
+  algorithm = alg_class(env=env, agent=agent, optimizer=optimizer, **alg_cfg)
   print(
     f"algorithm: {alg_type.upper()}"
     f" | rollout={env.max_length}×{env.num_players} players"
