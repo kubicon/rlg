@@ -31,6 +31,7 @@ from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
 from src.algorithms.mmd_q import QMMD
 from src.trainers.trainer import StandardTrainer, StdoutLogger
+from opt_muon import optimistic_muon
 
 
 _ALGORITHMS = {
@@ -58,6 +59,7 @@ _OPTIMIZERS = {
   "sgd": lambda cfg: optax.sgd(cfg["lr"], momentum=cfg.get("momentum", 0.0)),
   "muon": lambda cfg: optax.contrib.muon(cfg["lr"], beta=cfg.get("momentum", 0.95), nesterov=cfg.get("nesterov", True), ns_steps=cfg.get("ns_steps", 5), weight_decay=cfg.get("weight_decay", 0.0), adam_weight_decay=cfg.get("adam_weight_decay", 0.0), adam_learning_rate=float(cfg.get("adam_learning_rate", 3e-4))),
   "optgd": lambda cfg: optax.optimistic_gradient_descent(cfg["lr"], alpha=cfg.get("alpha", 1.0), beta=cfg.get("beta", 1.0)),
+  "optmuon": lambda cfg: optimistic_muon(cfg["lr"], alpha=cfg.get("alpha", 1.0), beta=cfg.get("beta", 1.0), position=cfg.get("position", "after"), momentum=cfg.get("momentum", 0.95), nesterov=cfg.get("nesterov", True), ns_steps=cfg.get("ns_steps", 5), weight_decay=cfg.get("weight_decay", 0.0), adam_weight_decay=cfg.get("adam_weight_decay", 0.0), adam_learning_rate=cfg.get("adam_learning_rate", None)),
 }
 
 
