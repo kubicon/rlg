@@ -170,3 +170,49 @@ class GRUTorso(Torso):
 
   def init_state(self, params: Any) -> jax.Array:
     return params["init_h"]
+
+
+class ThinkingGRUTorso(Torso):
+  """Deep GRU that "thinks" for n_steps on a single, fixed observation.
+
+  Unlike GRUTorso, this carries no recurrent state across episode timesteps.
+  For each observation a stack of ``n_layers`` GRU cells is unrolled for
+  ``n_steps`` "thinking" iterations:
+
+    * Each layer has its own learnable initial hidden state and its own GRU
+      cell, whose weights are *shared (tied) across the n_steps iterations* —
+      depth in n_steps is weight-tied unrolling (cf. Deep Thinking / UT).
+    * Within one iteration the observation is fed into layer 0; each layer's
+      output hidden state feeds the next layer (genuine per-step depth).
+    * The stack of n_layers hidden states is threaded forward across the
+      n_steps iterations.
+
+  After n_steps the top layer's hidden state is projected to feature_dim.
+  The framework-level ``state`` is ignored and returned unchanged, so the torso
+  is stateless from the rollout's perspective — the only recurrence is the
+  internal "thinking" loop per observation.
+  """
+
+  hidden_dim: int
+  n_steps: int
+  n_layers: int = 1
+
+  @nn.compact
+  def __call__(self, x: Any, state: Any) -> tuple[jax.Array, Any]:
+    # One learnable initial hidden state per layer.
+    init_h = self.param(
+      "init_h", nn.initializers.zeros, (self.n_layers, self.hidden_dim)
+    )
+    batch = x.shape[:-1]
+    hs = [
+      jnp.broadcast_to(init_h[l], batch + (self.hidden_dim,))
+      for l in range(self.n_layers)
+    ]
+    # One cell per layer, each reused across all n_steps -> weight-tied thinking.
+    cells = [nn.GRUCell(self.hidden_dim) for _ in range(self.n_layers)]
+    for _ in range(self.n_steps):
+      inp = x
+      for l in range(self.n_layers):
+        hs[l], _ = cells[l](hs[l], inp)
+        inp = hs[l]
+    return nn.Dense(self.feature_dim)(hs[-1]), state

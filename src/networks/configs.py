@@ -185,6 +185,23 @@ def _(feature_dim: int = 256, hidden_dim: int = 256):
   return GRUTorso(feature_dim=feature_dim, hidden_dim=hidden_dim)
 
 
+@register_torso("thinking_gru")
+def _(
+  feature_dim: int = 256,
+  hidden_dim: int = 256,
+  n_steps: int = 4,
+  n_layers: int = 1,
+):
+  from .torsos import ThinkingGRUTorso
+
+  return ThinkingGRUTorso(
+    feature_dim=feature_dim,
+    hidden_dim=hidden_dim,
+    n_steps=n_steps,
+    n_layers=n_layers,
+  )
+
+
 # ── Head builders ──────────────────────────────────────────────────────────
 
 
