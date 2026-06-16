@@ -51,17 +51,20 @@ class MMD(PPOBase):
       magnet_interval:         Steps between hard resets (used when magnet_update_type=periodic).
       magnet_update_rate:      Polyak τ for magnet update (used when magnet_update_type=incremental).
       magnet_update_type:      "periodic" (hard reset every k steps) or "incremental" (Polyak).
-      regularize_value:        If True, fold the per-node KL-to-magnet cost into
-                               the reward (RNaD reward transform) so the critic
-                               learns the regularized value V_τ and advantages
-                               carry downstream regularization (value-space /
-                               dilated regularizer). Following the paper's V_τ,
-                               the value carries BOTH players' regularization
-                               (two-player zero-sum: each pays its own KL, is
-                               credited the opponent's). The per-step magnet term
-                               in the loss is disabled to avoid double-counting.
-                               If False (default), the magnet acts only per-step
-                               via the loss penalty (original behaviour).
+      regularize_value:        If True, ADD value-space (dilated) regularization
+                               on top of the per-step magnet penalty: fold the
+                               per-node KL-to-magnet cost into the reward (RNaD
+                               reward transform) so the critic learns V_τ and the
+                               advantages carry downstream regularization.
+                               Following the paper's V_τ, the value carries BOTH
+                               players' regularization (two-player zero-sum: each
+                               pays its own KL, is credited the opponent's). The
+                               per-step penalty is KEPT — it supplies the direct
+                               current-node gradient that the reward transform
+                               (full-distribution KL) cancels in the advantage,
+                               so the two are complementary, not double-counted.
+                               If False (default), only the per-step penalty acts
+                               (original behaviour).
   """
 
   def __init__(
@@ -171,13 +174,18 @@ class MMD(PPOBase):
 
     valid = self._valid_mask(episodes.dones)
 
-    # Value-space (dilated) regularization. Fold the per-node KL-to-magnet cost
-    # into the reward (RNaD reward transform) so the critic regresses to the
-    # regularized value V_τ and the advantages carry the regularization of every
-    # downstream infoset. The matching per-step magnet term in the loss is then
-    # disabled (loss_magnet_coef = 0) so the current node is not counted twice.
-    # All quantities below are stop-gradiented (rollout + magnet policies), so no
-    # policy gradient leaks into the value target.
+    # Value-space (dilated) regularization. The regularized-objective gradient
+    # ∇[V − τR] splits into (i) a DIRECT current-node term −τ·∇KL(π(·|s)‖ref) and
+    # (ii) a downstream/score-function term. We keep the per-step magnet penalty
+    # in the loss for (i) (loss_magnet_coef stays magnet_coef) and ADD the reward
+    # transform below for (ii): fold the per-node KL cost into the reward so the
+    # critic regresses to V_τ and the advantages carry downstream regularization.
+    # These are different terms of the same gradient, not a double count — the
+    # transform uses the full-distribution KL, a per-node constant that cancels
+    # in the advantage A(s,a)=Q−V, so it contributes nothing at the current node
+    # (handled by the penalty) and only the downstream effect survives.
+    # All quantities here are stop-gradiented (rollout + magnet), so no policy
+    # gradient leaks into the value target.
     if self.regularize_value:
       log_mu = safe_log_softmax(episodes.agent_output.logits, episodes.legal_actions)
       log_ref = safe_log_softmax(magnet_logits, episodes.legal_actions)
@@ -186,14 +194,14 @@ class MMD(PPOBase):
       # player pays its own KL and is credited the opponents' KL, so the value
       # carries BOTH players' regularization (paper Sec. 2.2) and stays zero-sum
       # (Σ_p r̃_p = Σ_p r_p). total − 2·own gives (opp − own); for a single
-      # player it reduces to −own (the opponent term vanishes).
+      # player it reduces to −own (the opponent term vanishes). The opponent
+      # (cross) term is a pure downstream/reach effect — the current node only
+      # has the own-KL direct gradient, supplied by the per-step penalty.
       total_kl = node_kl.sum(axis=-1, keepdims=True)       # (B, T, 1) — Σ_p KL_p
       reg = magnet_coef * (2.0 * node_kl - total_kl)        # τ·(own − opp) per player
       rewards_eff = episodes.rewards - reg * valid[..., None]
-      loss_magnet_coef = 0.0
     else:
       rewards_eff = episodes.rewards
-      loss_magnet_coef = magnet_coef
 
     # Use target values for GAE bootstrapping (stable value estimates).
     advantages, targets = self._compute_advantages(
@@ -233,7 +241,7 @@ class MMD(PPOBase):
             clip_eps,
             vf_coef,
             ent_coef,
-            loss_magnet_coef,
+            magnet_coef,
             old_policy_coef,
           )
         elif self.loss_type == LossType.RNAD:
@@ -254,7 +262,7 @@ class MMD(PPOBase):
             clip_eps,
             vf_coef,
             ent_coef,
-            loss_magnet_coef,
+            magnet_coef,
             neurd_clip,
             neurd_threshold,
           )
