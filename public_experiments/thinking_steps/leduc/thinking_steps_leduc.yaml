@@ -39,7 +39,7 @@ algorithm:
         feature_dim: 128
         hidden_dim: 128
         n_steps: 5
-        n_layers: 1
+        n_layers: 2
       head1:
         type: categorical
         n_actions: null
