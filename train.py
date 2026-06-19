@@ -32,7 +32,6 @@ from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
 from src.algorithms.mmd_q import QMMD
 from src.algorithms.npg import NPG
-from src.algorithms.rm_rnad import RMRNaD
 from src.trainers.trainer import StandardTrainer, StdoutLogger
 from opt_muon import optimistic_muon
 from adaptive_adam import adaptive_oadam
@@ -43,7 +42,6 @@ _ALGORITHMS = {
   "mmd": MMD,
   "qmmd": QMMD,
   "npg": NPG,
-  "rm_rnad": RMRNaD,
 }
 
 _AGENT_CLASSES = {
@@ -57,7 +55,6 @@ _AGENT_CLASSES = {
   "mmd": ActorCriticAgent,
   "qmmd": PolicyQAgent,
   "npg": PolicyQAgent,
-  "rm_rnad": ActorCriticAgent,
 }
 
 _OPTIMIZERS = {
