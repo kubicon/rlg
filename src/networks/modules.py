@@ -5,6 +5,8 @@ import jax.numpy as jnp
 import jax
 import flax.linen as nn
 
+from .rm_simplex import rm_simplex
+
 
 _ACTIVATIONS = {
   "none": lambda x: x,
@@ -16,6 +18,8 @@ _ACTIVATIONS = {
   "elu": jnn.elu,
   "leaky_relu": jnn.leaky_relu,
   "softplus": jnn.softplus,
+  # Optional (D): hard RM-simplex hidden activation with a custom backward.
+  "rm_simplex": rm_simplex,
 }
 
 

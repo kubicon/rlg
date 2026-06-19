@@ -177,6 +177,7 @@ def optimistic_muon(
   return optax.chain(*chain)
 
 
+
 if __name__ == "__main__":
   # Minimal sanity check: a bilinear saddle x*y, where vanilla GD spirals out
   # but optimistic methods converge. We just confirm the optimizer runs and
