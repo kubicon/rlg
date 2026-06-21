@@ -157,6 +157,24 @@ class MatchingPennies(NormalFormGame):
     super().__init__(_zero_sum(_MP_P0))
 
 
+class BiasedRockPaperScissors(NormalFormGame):
+  """Rock-Paper-Scissors with an inflated reward for the Rock-beats-Scissors outcome.
+
+  Actions: 0=Rock, 1=Paper, 2=Scissors. The bias is added to the (Rock, Scissors)
+  cell of player 0's payoff table — i.e. when player 0 plays Rock and player 1
+  plays Scissors — and subtracted from player 1's (zero-sum), shifting the Nash
+  equilibrium away from the uniform 1/3 strategy.
+
+  Args:
+      bias: amount added to player 0's Rock-vs-Scissors payoff.
+  """
+
+  def __init__(self, bias: float = 1.0) -> None:
+    p0 = _RPS_P0.copy()
+    p0[0, 2] += bias
+    super().__init__(_zero_sum(p0))
+
+
 class BiasedMatchingPennies(NormalFormGame):
   """Matching Pennies with an inflated reward for the Tails-Tails outcome.
 

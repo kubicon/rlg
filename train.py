@@ -31,16 +31,17 @@ from src.agents.actor_critic import (
 from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
 from src.algorithms.mmd_q import QMMD
+from src.algorithms.gumbel_q import GumbelQMMD
 from src.algorithms.npg import NPG
 from src.trainers.trainer import StandardTrainer, StdoutLogger
-from opt_muon import optimistic_muon
-from adaptive_adam import adaptive_oadam
+from opt_muon import optimistic_muon 
 
 
 _ALGORITHMS = {
   "ppo": PPO,
   "mmd": MMD,
   "qmmd": QMMD,
+  "gumbel_qmmd": GumbelQMMD,
   "npg": NPG,
 }
 
@@ -54,6 +55,7 @@ _AGENT_CLASSES = {
   "ppo": ActorCriticAgent,
   "mmd": ActorCriticAgent,
   "qmmd": PolicyQAgent,
+  "gumbel_qmmd": PolicyQAgent,
   "npg": PolicyQAgent,
 }
 
@@ -63,8 +65,7 @@ _OPTIMIZERS = {
   "adamw": lambda cfg: optax.adamw(cfg["lr"], b1=cfg.get("b1", 0.9), b2=cfg.get("b2", 0.999), weight_decay=cfg.get("weight_decay", 1e-4)),
   "sgd": lambda cfg: optax.sgd(cfg["lr"], momentum=cfg.get("momentum", 0.0)),
   "muon": lambda cfg: optax.contrib.muon(cfg["lr"], beta=cfg.get("momentum", 0.95), nesterov=cfg.get("nesterov", True), ns_steps=cfg.get("ns_steps", 5), weight_decay=cfg.get("weight_decay", 0.0), adam_weight_decay=cfg.get("adam_weight_decay", 0.0), adam_learning_rate=float(cfg.get("adam_learning_rate", 3e-4))),
-  "optgd": lambda cfg: optax.optimistic_gradient_descent(cfg["lr"], alpha=cfg.get("alpha", 1.0), beta=cfg.get("beta", 1.0)),
-  "adaptive_oadam": lambda cfg: adaptive_oadam(eta=cfg["lr"], alpha=cfg.get("alpha", 1.0), beta=cfg.get("beta", 1.0), b1=cfg.get("b1", 0.9), b2=cfg.get("b2", 0.999), eps_adam=cfg.get("eps", 1e-8), eps_global=cfg.get("eps_global", 1e-8)),
+  "optgd": lambda cfg: optax.optimistic_gradient_descent(cfg["lr"], alpha=cfg.get("alpha", 1.0), beta=cfg.get("beta", 1.0)), 
   "optmuon": lambda cfg: optimistic_muon(cfg["lr"], alpha=cfg.get("alpha", 1.0), beta=cfg.get("beta", 1.0), position=cfg.get("position", "after"), momentum=cfg.get("momentum", 0.95), nesterov=cfg.get("nesterov", True), ns_steps=cfg.get("ns_steps", 5), weight_decay=cfg.get("weight_decay", 0.0), adam_weight_decay=cfg.get("adam_weight_decay", 0.0), adam_learning_rate=cfg.get("adam_learning_rate", None)),
 }
 

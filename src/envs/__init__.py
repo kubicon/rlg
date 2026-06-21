@@ -9,6 +9,7 @@ from .mnk import MNK, TicTacToe
 from .normal_form import (
   NormalFormGame,
   RockPaperScissors,
+  BiasedRockPaperScissors,
   MatchingPennies,
   BiasedMatchingPennies,
 )
@@ -23,6 +24,7 @@ _REGISTRY: dict[str, type] = {
   "tictactoe": TicTacToe,
   "normal_form": NormalFormGame,
   "rps": RockPaperScissors,
+  "biased_rps": BiasedRockPaperScissors,
   "matching_pennies": MatchingPennies,
   "biased_matching_pennies": BiasedMatchingPennies,
 }
