@@ -4,14 +4,15 @@
 Usage:
     python eval_checkpoints.py <checkpoint_dir>
     python eval_checkpoints.py data/mmd_goofspiel
+    python eval_checkpoints.py data/mmd_goofspiel --threshold nucleus --epsilon 0.05
 """
 
 from __future__ import annotations
 
+import argparse
 import glob
 import os
 import pickle
-import sys
 from typing import Any
 
 import jax
@@ -91,12 +92,51 @@ def _build_apply_fn(agent, env):
   return agent.build_eval_fn(env)
 
 
+def _apply_threshold(probs: np.ndarray, mode: str, epsilon: float) -> np.ndarray:
+  """Filter a probability vector and renormalize.
+
+  Modes:
+      "epsilon": zero out any action played with probability < epsilon.
+      "nucleus": top-p filtering — keep the smallest set of highest-probability
+                 actions whose cumulative mass reaches (1 - epsilon), drop the
+                 rest (the tail of total mass epsilon).
+
+  With epsilon == 0.0 both modes are the identity (no filtering).
+  """
+  if epsilon <= 0.0:
+    return probs
+
+  if mode == "epsilon":
+    filtered = np.where(probs < epsilon, 0.0, probs)
+  elif mode == "nucleus":
+    order = np.argsort(probs)[::-1]  # descending
+    cumulative = np.cumsum(probs[order])
+    # Keep every action up to and including the one that first reaches the
+    # (1 - epsilon) cumulative-mass cutoff.
+    keep_sorted = cumulative < (1.0 - epsilon)
+    if keep_sorted.size > 0:
+      keep_sorted[np.argmax(~keep_sorted)] = True  # include the crossing action
+    keep = np.zeros_like(probs, dtype=bool)
+    keep[order] = keep_sorted
+    filtered = np.where(keep, probs, 0.0)
+  else:
+    raise ValueError(f"unknown threshold mode {mode!r}")
+
+  total = filtered.sum()
+  if total <= 0.0:
+    # Degenerate: everything got filtered out — fall back to the original.
+    return probs
+  return filtered / total
+
+
 def _params_to_strategy(
   params: Any,
   ids: list[bytes],
   obs_batch: np.ndarray,
   mask_batch: np.ndarray,
   apply_fn,
+  threshold_mode: str = "epsilon",
+  epsilon: float = 0.0,
 ) -> Strategy:
   """Single batched forward pass → Strategy dict."""
   if not ids:
@@ -111,6 +151,7 @@ def _params_to_strategy(
     logits -= logits.max()
     probs = np.where(mask, np.exp(logits), 0.0)
     probs /= probs.sum()
+    probs = _apply_threshold(probs, threshold_mode, epsilon)
     strategy[iset_id] = probs
 
   return strategy
@@ -119,13 +160,22 @@ def _params_to_strategy(
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
-def main(checkpoint_dir: str) -> None:
+def main(
+  checkpoint_dir: str,
+  threshold_mode: str = "epsilon",
+  epsilon: float = 0.0,
+) -> None:
   config_path = os.path.join(checkpoint_dir, "config.yaml")
   if not os.path.exists(config_path):
     raise FileNotFoundError(f"No config.yaml found in {checkpoint_dir!r}")
 
   with open(config_path) as f:
     cfg = yaml.safe_load(f)
+
+  if epsilon > 0.0:
+    print(f"thresholding: mode={threshold_mode}  epsilon={epsilon}")
+  else:
+    print("thresholding: disabled (epsilon=0.0)")
 
   # ── Build env and agent ───────────────────────────────────────────────
   env = build_env(cfg["env"])
@@ -189,8 +239,8 @@ def main(checkpoint_dir: str) -> None:
     params = (extras or {}).get("target_params", state.params)
     step = int(state.step)
 
-    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn)
-    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn)
+    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn, threshold_mode, epsilon)
+    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn, threshold_mode, epsilon)
 
     if isinstance(env, LeducHoldem):
       _RANK_NAMES = ["J", "Q", "K"]
@@ -251,7 +301,22 @@ def main(checkpoint_dir: str) -> None:
 
 
 if __name__ == "__main__":
-  if len(sys.argv) != 2:
-    print(__doc__)
-    sys.exit(1)
-  main(sys.argv[1])
+  parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+  parser.add_argument("checkpoint_dir", help="directory containing config.yaml and *.pkl checkpoints")
+  parser.add_argument(
+    "--threshold",
+    dest="threshold_mode",
+    choices=["epsilon", "nucleus"],
+    default="epsilon",
+    help="thresholding mode: 'epsilon' zeros out actions with prob < epsilon; "
+    "'nucleus' applies top-p filtering keeping cumulative mass (1 - epsilon). "
+    "(default: epsilon)",
+  )
+  parser.add_argument(
+    "--epsilon",
+    type=float,
+    default=0.0,
+    help="thresholding epsilon (default: 0.0, i.e. no filtering)",
+  )
+  args = parser.parse_args()
+  main(args.checkpoint_dir, args.threshold_mode, args.epsilon)
