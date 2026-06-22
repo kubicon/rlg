@@ -16,7 +16,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import jax.lax as lax
-from ..utils import safe_log_softmax
+from ..policy import policy_probs, policy_log_probs, policy_entropy_loss
 
 
 def ppo_loss(
@@ -31,11 +31,12 @@ def ppo_loss(
   clip_eps: float = 0.2,
   vf_coef: float = 0.5,
   ent_coef: float = 0.01,
+  alpha: float = 1.0,
 ) -> tuple[jax.Array, dict]:
   """PPO loss for a single (timestep, player) sample → scalar."""
-  strategy = jax.nn.softmax(logits, where=legal_actions)
-  log_probs_all = safe_log_softmax(logits, legal_actions)
-  sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions)
+  strategy = policy_probs(logits, legal_actions, alpha)
+  log_probs_all = policy_log_probs(logits, legal_actions, alpha)
+  sample_log_probs_all = policy_log_probs(sample_logits, legal_actions, alpha)
 
   # Log prob of the action actually taken → scalar
   log_prob = log_probs_all[actions]
@@ -43,7 +44,7 @@ def ppo_loss(
 
   policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantages, clip_eps)
   value_loss = ppo_value_loss(values, sample_values, returns, clip_eps)
-  entropy_loss = ppo_entropy_loss(log_probs_all, strategy)
+  entropy_loss = policy_entropy_loss(strategy, log_probs_all, alpha)
 
   total = policy_loss + vf_coef * value_loss + ent_coef * entropy_loss
   return total, {
@@ -51,12 +52,6 @@ def ppo_loss(
     "value_loss": value_loss,
     "entropy_loss": entropy_loss,
   }
-
-
-def ppo_entropy_loss(log_probs: jax.Array, strategy: jax.Array) -> jax.Array:
-  """Negative entropy for a single sample (scalar). Minimising this maximises entropy."""
-  entropy = -(strategy * log_probs).sum(-1)  # scalar
-  return -entropy
 
 
 def ppo_policy_loss(

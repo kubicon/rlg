@@ -34,7 +34,7 @@ from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
-from ..utils import safe_log_softmax, kl_divergence
+from ..policy import policy_probs, policy_log_probs, policy_kl
 from .types import LossType, MagnetUpdateType, MMD_SCHEDULABLE
 
 
@@ -92,6 +92,7 @@ class MMD(PPOBase):
     loss_type: LossType = LossType.MMD,
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
+    alpha: float = 1.0,
     alternating: bool = False,
     regularize_value: bool = False,
     schedules: dict[str, Callable[[int], float]] | None = None,
@@ -111,6 +112,7 @@ class MMD(PPOBase):
       trace_clip,
       optimizer,
       grad_clip,
+      alpha,
     )
     self.magnet_coef = magnet_coef
     self.old_policy_coef = old_policy_coef
@@ -162,7 +164,8 @@ class MMD(PPOBase):
 
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
-      self.env, self.agent, state.params, collect_key, self.batch_size
+      self.env, self.agent, state.params, collect_key, self.batch_size,
+      alpha=self.alpha,
     )
 
     # Both auxiliary networks are fixed across all epochs — precompute once.
@@ -187,9 +190,11 @@ class MMD(PPOBase):
     # All quantities here are stop-gradiented (rollout + magnet), so no policy
     # gradient leaks into the value target.
     if self.regularize_value:
-      log_mu = safe_log_softmax(episodes.agent_output.logits, episodes.legal_actions)
-      log_ref = safe_log_softmax(magnet_logits, episodes.legal_actions)
-      node_kl = kl_divergence(log_mu, log_ref)  # (B, T, P) — KL(μ(·|s) ‖ π_ref)
+      mu = policy_probs(episodes.agent_output.logits, episodes.legal_actions, self.alpha)
+      log_mu = policy_log_probs(episodes.agent_output.logits, episodes.legal_actions, self.alpha)
+      ref = policy_probs(magnet_logits, episodes.legal_actions, self.alpha)
+      log_ref = policy_log_probs(magnet_logits, episodes.legal_actions, self.alpha)
+      node_kl = policy_kl(mu, log_mu, ref, log_ref, self.alpha)  # (B, T, P) — D(μ(·|s) ‖ π_ref)
       # Two-player zero-sum regularized value Φ = V − τ·R_self + τ·R_opp: each
       # player pays its own KL and is credited the opponents' KL, so the value
       # carries BOTH players' regularization (paper Sec. 2.2) and stays zero-sum
@@ -224,7 +229,7 @@ class MMD(PPOBase):
         agent_out = self._eval_params(params, episodes)
 
         if self.loss_type == LossType.MMD:
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
           loss_P = jax.vmap(mmd_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -243,9 +248,10 @@ class MMD(PPOBase):
             ent_coef,
             magnet_coef,
             old_policy_coef,
+            self.alpha,
           )
         elif self.loss_type == LossType.RNAD:
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
           loss_P = jax.vmap(rnad_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -265,6 +271,7 @@ class MMD(PPOBase):
             magnet_coef,
             neurd_clip,
             neurd_threshold,
+            self.alpha,
           )
         if self.alternating:
           wmean = lambda x: self._wmean(x * player_mask, valid)

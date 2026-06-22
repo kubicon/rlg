@@ -18,6 +18,7 @@ import jax.numpy as jnp
 
 from ..agents.base import Agent
 from ..envs.base import Env, EnvState
+from ..policy import policy_probs
 
 
 class Episode(NamedTuple):
@@ -49,6 +50,7 @@ def collect_episodes(
   normalize_rewards: bool = True,
   opp_params: Any = None,
   br_player: int | None = None,
+  alpha: float = 1.0,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect a batch of episodes from the environment.
 
@@ -58,8 +60,8 @@ def collect_episodes(
   rng = jax.random.split(rng, batch_size)
   return jax.vmap(
     collect_episode,
-    in_axes=(None, None, None, 0, None, None, None, None, None, None),
-  )(env, agent, params, rng, None, None, None, normalize_rewards, opp_params, br_player)
+    in_axes=(None, None, None, 0, None, None, None, None, None, None, None),
+  )(env, agent, params, rng, None, None, None, normalize_rewards, opp_params, br_player, alpha)
 
 
 def collect_episodes_br(
@@ -71,6 +73,7 @@ def collect_episodes_br(
   rng: Any,
   batch_size: int,
   normalize_rewards: bool = True,
+  alpha: float = 1.0,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Convenience wrapper: collect episodes with a fixed opponent policy."""
   return collect_episodes(
@@ -82,6 +85,7 @@ def collect_episodes_br(
     normalize_rewards,
     opp_params=opp_params,
     br_player=br_player,
+    alpha=alpha,
   )
 
 
@@ -96,6 +100,7 @@ def collect_episode(
   normalize_rewards: bool = True,
   opp_params: Any = None,
   br_player: int | None = None,
+  alpha: float = 1.0,
 ) -> tuple[EnvState, Any, Any, Episode]:
   """Collect rollout_len steps from env under the current policy.
 
@@ -167,16 +172,24 @@ def collect_episode(
     agent_out, new_agent_state = agent.player_evaluate(params, agent_state, obs)
 
     if opp_params is None:
-      logits_masked = jnp.where(legal_actions, agent_out.logits, -jnp.inf)
+      policy_logits = agent_out.logits
     else:
       opp_obs = agent.make_obs_step(infosets, state_rep)
       opp_out, _ = agent.player_evaluate(opp_params, agent_state, opp_obs)
       is_br = jnp.arange(P) == br_player
-      mixed_logits = jnp.where(is_br[:, None], agent_out.logits, opp_out.logits)
-      logits_masked = jnp.where(legal_actions, mixed_logits, -jnp.inf)
+      policy_logits = jnp.where(is_br[:, None], agent_out.logits, opp_out.logits)
 
     player_keys = jax.random.split(act_key, P)
-    actions = jax.vmap(jax.random.categorical)(player_keys, logits_masked)
+    if alpha == 1.0:
+      logits_masked = jnp.where(legal_actions, policy_logits, -jnp.inf)
+      actions = jax.vmap(jax.random.categorical)(player_keys, logits_masked)
+    else:
+      # α-entmax: sample from the entmax distribution. Feeding its log-probs to
+      # categorical reproduces the entmax sampling weights (zero-mass actions
+      # become -inf → never sampled).
+      probs = policy_probs(policy_logits, legal_actions, alpha)
+      sampling_logits = jnp.where(probs > 0, jnp.log(probs), -jnp.inf)
+      actions = jax.vmap(jax.random.categorical)(player_keys, sampling_logits)
 
     new_env_state, rewards, done, _ = env.apply_action(env_state, actions, env_key)
 

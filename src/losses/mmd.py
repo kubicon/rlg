@@ -1,6 +1,6 @@
-from .ppo import ppo_policy_loss, ppo_value_loss, ppo_entropy_loss
+from .ppo import ppo_policy_loss, ppo_value_loss
 import jax
-from ..utils import safe_log_softmax, kl_divergence
+from ..policy import policy_probs, policy_log_probs, policy_entropy_loss, policy_kl
 
 
 def mmd_loss(
@@ -18,23 +18,23 @@ def mmd_loss(
   ent_coef: float,
   magnet_coef: float,
   old_policy_coef: float,
+  alpha: float = 1.0,
 ) -> tuple[jax.Array, dict]:
-  strategy = jax.nn.softmax(logits, where=legal_actions)  # (A,)
-  log_probs_all = safe_log_softmax(logits, legal_actions)  # (A,)
-  sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions)  # (A,)
-  magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)  # (A,)
+  strategy = policy_probs(logits, legal_actions, alpha)  # (A,)
+  log_probs_all = policy_log_probs(logits, legal_actions, alpha)  # (A,)
+  sample_strategy = policy_probs(sample_logits, legal_actions, alpha)  # (A,)
+  sample_log_probs_all = policy_log_probs(sample_logits, legal_actions, alpha)  # (A,)
+  magnet_strategy = policy_probs(magnet_logits, legal_actions, alpha)  # (A,)
+  magnet_log_probs_all = policy_log_probs(magnet_logits, legal_actions, alpha)  # (A,)
 
   log_prob = log_probs_all[actions]
   sample_log_prob = sample_log_probs_all[actions]
-  # magnet_log_prob = magnet_log_probs_all[actions]
-
-  # advantages = advantages - magnet_coef *( log_prob - magnet_log_prob)
 
   policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantages, clip_eps)
   value_loss = ppo_value_loss(values, sample_values, returns, clip_eps)
-  magnet_loss = kl_divergence(log_probs_all, magnet_log_probs_all)
-  old_kl_loss = kl_divergence(log_probs_all, sample_log_probs_all)
-  entropy_loss = ppo_entropy_loss(log_probs_all, strategy)
+  magnet_loss = policy_kl(strategy, log_probs_all, magnet_strategy, magnet_log_probs_all, alpha)
+  old_kl_loss = policy_kl(strategy, log_probs_all, sample_strategy, sample_log_probs_all, alpha)
+  entropy_loss = policy_entropy_loss(strategy, log_probs_all, alpha)
   total = (
     policy_loss
     + vf_coef * value_loss

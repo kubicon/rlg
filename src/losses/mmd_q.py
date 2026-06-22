@@ -25,10 +25,10 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .ppo import ppo_policy_loss, ppo_value_loss, ppo_entropy_loss
+from .ppo import ppo_policy_loss, ppo_value_loss
 from .neurd import neurd_loss
 from .rnad import estimate_baseline_regrets, rnad_regularization
-from ..utils import safe_log_softmax, kl_divergence
+from ..policy import policy_probs, policy_log_probs, policy_entropy_loss, policy_kl
 
 
 def mmd_q_loss(
@@ -46,12 +46,15 @@ def mmd_q_loss(
   ent_coef: float,
   magnet_coef: float,
   old_policy_coef: float,
+  alpha: float = 1.0,
 ) -> tuple[jax.Array, dict]:
   """MMD-Q loss for a single (timestep, player) sample → scalar."""
-  pi = jax.nn.softmax(logits, where=legal_actions)           # (A,)
-  log_probs_all = safe_log_softmax(logits, legal_actions)    # (A,)
-  sample_log_probs_all = safe_log_softmax(sample_logits, legal_actions)
-  magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
+  pi = policy_probs(logits, legal_actions, alpha)            # (A,)
+  log_probs_all = policy_log_probs(logits, legal_actions, alpha)    # (A,)
+  sample_pi = policy_probs(sample_logits, legal_actions, alpha)
+  sample_log_probs_all = policy_log_probs(sample_logits, legal_actions, alpha)
+  magnet_pi = policy_probs(magnet_logits, legal_actions, alpha)
+  magnet_log_probs_all = policy_log_probs(magnet_logits, legal_actions, alpha)
 
   # ── Policy gradient: all-actions mean-actor-critic ───────────────────────
   # NOTE: Tried to do the gradient update across all actions, it had much more variance and with smaller batches it was unstable.
@@ -70,9 +73,9 @@ def mmd_q_loss(
   q_loss = ppo_value_loss(q_taken, sample_q_taken, q_target, clip_eps)
 
   # ── Auxiliary terms (unchanged from MMD) ─────────────────────────────────
-  magnet_loss = kl_divergence(log_probs_all, magnet_log_probs_all)
-  old_kl_loss = kl_divergence(log_probs_all, sample_log_probs_all)
-  entropy_loss = ppo_entropy_loss(log_probs_all, pi)
+  magnet_loss = policy_kl(pi, log_probs_all, magnet_pi, magnet_log_probs_all, alpha)
+  old_kl_loss = policy_kl(pi, log_probs_all, sample_pi, sample_log_probs_all, alpha)
+  entropy_loss = policy_entropy_loss(pi, log_probs_all, alpha)
 
   total = (
     policy_loss
@@ -106,6 +109,7 @@ def rnad_q_loss(
   magnet_coef: float,
   neurd_clip: float,
   neurd_threshold: float,
+  alpha: float = 1.0,
 ) -> tuple[jax.Array, dict]:
   """RNaD-Q loss for a single (timestep, player) sample → scalar.
 
@@ -117,9 +121,10 @@ def rnad_q_loss(
   so the baseline is centered over the same regularized vector. The live
   Q-head never enters the regret (it is trained only by the Q-loss).
   """
-  log_probs_all = safe_log_softmax(logits, legal_actions)    # (A,)
-  strategy = jax.nn.softmax(logits, where=legal_actions)     # (A,)
-  magnet_log_probs_all = safe_log_softmax(magnet_logits, legal_actions)
+  log_probs_all = policy_log_probs(logits, legal_actions, alpha)    # (A,)
+  strategy = policy_probs(logits, legal_actions, alpha)     # (A,)
+  magnet_strategy = policy_probs(magnet_logits, legal_actions, alpha)
+  magnet_log_probs_all = policy_log_probs(magnet_logits, legal_actions, alpha)
 
   # ── Per-action regularized Q-vector: target-net Q, sampled → Retrace ─────
   q_vec = target_q_values.at[actions].set(q_target)
@@ -128,7 +133,11 @@ def rnad_q_loss(
   )
 
   # ── Regret = Q_reg(s,a) − E_π[Q_reg(s,·)] (centered over the same vector) ─
-  regrets = q_reg - jnp.dot(q_reg, strategy)
+  # nan-safe baseline: α-entmax may zero a legal action, where the log-ratio
+  # regularisation makes q_reg ±inf; masking by strategy>0 avoids inf·0 = nan.
+  # Such per-action regrets are bounded by NeuRD's advantage clip downstream.
+  baseline = jnp.sum(jnp.where(strategy > 0, q_reg * strategy, 0.0))
+  regrets = q_reg - baseline
 
   # ── NeuRD policy loss ────────────────────────────────────────────────────
   policy_loss = -neurd_loss(logits, legal_actions, regrets, neurd_clip, neurd_threshold)
@@ -139,10 +148,10 @@ def rnad_q_loss(
   q_loss = ppo_value_loss(q_taken, sample_q_taken, q_target, clip_eps)
 
   # ── Entropy ───────────────────────────────────────────────────────────────
-  entropy_loss = ppo_entropy_loss(log_probs_all, strategy)
+  entropy_loss = policy_entropy_loss(strategy, log_probs_all, alpha)
 
   # Magnet KL logged for monitoring; already embedded in regrets above.
-  magnet_kl = kl_divergence(log_probs_all, magnet_log_probs_all)
+  magnet_kl = policy_kl(strategy, log_probs_all, magnet_strategy, magnet_log_probs_all, alpha)
 
   total = policy_loss + vf_coef * q_loss + ent_coef * entropy_loss
   return total, {

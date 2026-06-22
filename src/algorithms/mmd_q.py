@@ -46,6 +46,7 @@ from ..agents.base import Agent
 from ..envs.base import Env
 from ..advantage import retrace
 from ..losses.mmd_q import mmd_q_loss, rnad_q_loss
+from ..policy import policy_probs
 
 
 class QMMD(PPOBase):
@@ -95,6 +96,7 @@ class QMMD(PPOBase):
     neurd_threshold: float = 2.0,
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
+    alpha: float = 1.0,
     alternating: bool = False,
     schedules: dict[str, Callable[[int], float]] | None = None,
   ) -> None:
@@ -113,6 +115,7 @@ class QMMD(PPOBase):
       trace_clip=trace_clip,
       optimizer=optimizer,
       grad_clip=grad_clip,
+      alpha=alpha,
     )
     self.vf_coef = vf_coef
     self.loss_type = loss_type
@@ -160,7 +163,7 @@ class QMMD(PPOBase):
     # net's Q-values. Since π = μ the Retrace IS factor min(1, π/μ) is exactly
     # 1, so the trace coefficient is the constant gae_lambda (Expected
     # SARSA(λ) / Q-boosting).
-    mu = jax.nn.softmax(sample_logits, where=legal_actions)           # (B,T,P,A)
+    mu = policy_probs(sample_logits, legal_actions, self.alpha)       # (B,T,P,A)
 
     # V(s) = E_{a~μ}[Q_target(s, a)]
     v_target = (mu * target_q_values).sum(-1)                         # (B,T,P)
@@ -197,7 +200,8 @@ class QMMD(PPOBase):
 
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
-      self.env, self.agent, state.params, collect_key, self.batch_size
+      self.env, self.agent, state.params, collect_key, self.batch_size,
+      alpha=self.alpha,
     )
 
     # ── Retrace targets: target-net Q-values, on-policy rollout policy ──────
@@ -238,8 +242,8 @@ class QMMD(PPOBase):
         agent_out = self._eval_params(params, episodes)
 
         if self.loss_type == LossType.MMD:
-          # 9 arrays + 5 scalars
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
+          # 9 arrays + 6 scalars
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
           loss_P = jax.vmap(mmd_q_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -258,10 +262,11 @@ class QMMD(PPOBase):
             ent_coef,
             magnet_coef,
             old_policy_coef,
+            self.alpha,
           )
         elif self.loss_type == LossType.RNAD:
-          # 9 arrays + 6 scalars
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
+          # 9 arrays + 7 scalars
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
           loss_P = jax.vmap(rnad_q_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -281,6 +286,7 @@ class QMMD(PPOBase):
             magnet_coef,
             neurd_clip,
             neurd_threshold,
+            self.alpha,
           )
 
         if self.alternating:

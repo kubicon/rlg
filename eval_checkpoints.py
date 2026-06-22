@@ -129,6 +129,25 @@ def _apply_threshold(probs: np.ndarray, mode: str, epsilon: float) -> np.ndarray
   return filtered / total
 
 
+def _entmax_probs(logits: np.ndarray, mask: np.ndarray, alpha: float) -> np.ndarray:
+  """α-entmax over legal actions (numpy), matching src/policy.py at eval time."""
+  am1 = alpha - 1.0
+  z = np.where(mask, logits, -np.inf) * am1
+  d = int(mask.sum())
+  max_val = z.max()
+  tau_lo = max_val - 1.0
+  tau_hi = max_val - (1.0 / d) ** am1
+  p_of = lambda tau: np.maximum(z - tau, 0.0) ** (1.0 / am1)
+  dm = tau_hi - tau_lo
+  for _ in range(50):
+    dm *= 0.5
+    tau_m = tau_lo + dm
+    if p_of(tau_m).sum() - 1.0 >= 0.0:
+      tau_lo = tau_m
+  p = p_of(tau_lo)
+  return p / p.sum()
+
+
 def _params_to_strategy(
   params: Any,
   ids: list[bytes],
@@ -137,6 +156,7 @@ def _params_to_strategy(
   apply_fn,
   threshold_mode: str = "epsilon",
   epsilon: float = 0.0,
+  alpha: float = 1.0,
 ) -> Strategy:
   """Single batched forward pass → Strategy dict."""
   if not ids:
@@ -147,10 +167,13 @@ def _params_to_strategy(
   for idx, iset_id in enumerate(ids):
     logits = logits_batch[idx]
     mask = mask_batch[idx]
-    logits = np.where(mask, logits, -1e9)
-    logits -= logits.max()
-    probs = np.where(mask, np.exp(logits), 0.0)
-    probs /= probs.sum()
+    if alpha == 1.0:
+      logits = np.where(mask, logits, -1e9)
+      logits -= logits.max()
+      probs = np.where(mask, np.exp(logits), 0.0)
+      probs /= probs.sum()
+    else:
+      probs = _entmax_probs(logits, mask, alpha)
     probs = _apply_threshold(probs, threshold_mode, epsilon)
     strategy[iset_id] = probs
 
@@ -188,6 +211,9 @@ def main(
   alg_cfg = dict(cfg["algorithm"])
   agent_cfg = alg_cfg.pop("agent")
   alg_type = alg_cfg.get("type", "mmd").lower()
+  alpha = float(alg_cfg.get("alpha", 1.0))
+  if alpha != 1.0:
+    print(f"policy transform: α-entmax (alpha={alpha})")
   net_cfg = _fill_env_dims(agent_cfg["network"], env)
   network = build_network(net_cfg)
   explicit_agent_type = agent_cfg.get("type")
@@ -239,8 +265,8 @@ def main(
     params = (extras or {}).get("target_params", state.params)
     step = int(state.step)
 
-    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn, threshold_mode, epsilon)
-    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn, threshold_mode, epsilon)
+    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn, threshold_mode, epsilon, alpha)
+    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn, threshold_mode, epsilon, alpha)
 
     if isinstance(env, LeducHoldem):
       _RANK_NAMES = ["J", "Q", "K"]

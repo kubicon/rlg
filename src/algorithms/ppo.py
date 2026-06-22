@@ -55,6 +55,7 @@ class PPOBase(Algorithm):
     trace_clip: float = 1.0,
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
+    alpha: float = 1.0,
   ) -> None:
     self.env = env
     self.agent = agent
@@ -67,6 +68,8 @@ class PPOBase(Algorithm):
     self.gae_lambda = gae_lambda
     self.delta_clip = delta_clip
     self.trace_clip = trace_clip
+    # Policy transform exponent: 1.0 → softmax, >1 → α-entmax (sparse).
+    self.alpha = alpha
     base_optimizer = optimizer if optimizer is not None else optax.adam(lr)
     self.optimizer = (
       optax.chain(optax.clip_by_global_norm(grad_clip), base_optimizer)
@@ -184,7 +187,8 @@ class PPO(PPOBase):
   def step(self, state: TrainingState) -> tuple[TrainingState, dict[str, jax.Array]]:
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
-      self.env, self.agent, state.params, collect_key, self.batch_size
+      self.env, self.agent, state.params, collect_key, self.batch_size,
+      alpha=self.alpha,
     )
 
     # Target values are fixed across all epochs — precompute once.
@@ -205,7 +209,7 @@ class PPO(PPOBase):
       def total_loss(params):
         agent_out = self._eval_params(params, episodes)
 
-        _axes = (0, 0, 0, 0, 0, 0, 0, 0, None, None, None)
+        _axes = (0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None)
         loss_P = jax.vmap(ppo_loss, in_axes=_axes)
         loss_TP = jax.vmap(loss_P, in_axes=_axes)
         loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -221,6 +225,7 @@ class PPO(PPOBase):
           self.clip_eps,
           self.vf_coef,
           self.ent_coef,
+          self.alpha,
         )
         wmean = lambda x: self._wmean(x, valid)
         return wmean(losses), jax.tree.map(wmean, metrics)
