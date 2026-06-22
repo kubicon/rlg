@@ -32,7 +32,7 @@ from src.tree import (
   extract_game_tree,
 )
 from src.tree.best_response import best_response_values
-from train import _fill_env_dims, _AGENT_CLASSES
+from train import _fill_env_dims, _AGENT_CLASSES, build_schedules
 
 
 # ── Tree preprocessing (done once) ───────────────────────────────────────────
@@ -211,8 +211,16 @@ def main(
   alg_cfg = dict(cfg["algorithm"])
   agent_cfg = alg_cfg.pop("agent")
   alg_type = alg_cfg.get("type", "mmd").lower()
+  # Policy-transform exponent. If α was annealed during training, score each
+  # checkpoint with α(step) — the value the agent was actually playing at that
+  # step — rather than the converged value. Otherwise α is constant.
   alpha = float(alg_cfg.get("alpha", 1.0))
-  if alpha != 1.0:
+  alpha_schedule = None
+  sched_cfg = alg_cfg.get("schedules") or {}
+  if "alpha" in sched_cfg:
+    alpha_schedule = build_schedules({"alpha": sched_cfg["alpha"]})["alpha"]
+    print("policy transform: α-entmax (annealed; α reconstructed per checkpoint)")
+  elif alpha != 1.0:
     print(f"policy transform: α-entmax (alpha={alpha})")
   net_cfg = _fill_env_dims(agent_cfg["network"], env)
   network = build_network(net_cfg)
@@ -264,9 +272,10 @@ def main(
     extras = state.extras if hasattr(state, "extras") else None
     params = (extras or {}).get("target_params", state.params)
     step = int(state.step)
+    ckpt_alpha = float(alpha_schedule(step)) if alpha_schedule is not None else alpha
 
-    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn, threshold_mode, epsilon, alpha)
-    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn, threshold_mode, epsilon, alpha)
+    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn, threshold_mode, epsilon, ckpt_alpha)
+    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn, threshold_mode, epsilon, ckpt_alpha)
 
     if isinstance(env, LeducHoldem):
       _RANK_NAMES = ["J", "Q", "K"]
