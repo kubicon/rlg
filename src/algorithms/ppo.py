@@ -69,7 +69,9 @@ class PPOBase(Algorithm):
     self.delta_clip = delta_clip
     self.trace_clip = trace_clip
     # Policy transform exponent: 1.0 → softmax, >1 → α-entmax (sparse).
-    self.alpha = alpha
+    # Normalise to float so the softmax fast-path predicate stays a clean
+    # ``isinstance(alpha, float)`` check (a scheduled alpha arrives as a tracer).
+    self.alpha = float(alpha)
     base_optimizer = optimizer if optimizer is not None else optax.adam(lr)
     self.optimizer = (
       optax.chain(optax.clip_by_global_norm(grad_clip), base_optimizer)

@@ -158,12 +158,13 @@ class QMMD(PPOBase):
     actions: jax.Array,          # (B, T, P)
     legal_actions: jax.Array,    # (B, T, P, A)
     dones: jax.Array,            # (B, T)
+    alpha: float = 1.0,          # policy transform (softmax / α-entmax)
   ) -> jax.Array:                # (B, T, P) — Q targets
     # On-policy: bootstrap and trace use the rollout policy μ over the target
     # net's Q-values. Since π = μ the Retrace IS factor min(1, π/μ) is exactly
     # 1, so the trace coefficient is the constant gae_lambda (Expected
     # SARSA(λ) / Q-boosting).
-    mu = policy_probs(sample_logits, legal_actions, self.alpha)       # (B,T,P,A)
+    mu = policy_probs(sample_logits, legal_actions, alpha)            # (B,T,P,A)
 
     # V(s) = E_{a~μ}[Q_target(s, a)]
     v_target = (mu * target_q_values).sum(-1)                         # (B,T,P)
@@ -197,11 +198,12 @@ class QMMD(PPOBase):
     magnet_update_rate = _get("magnet_update_rate", self.magnet_update_rate)
     neurd_clip      = _get("neurd_clip",      self.neurd_clip)
     neurd_threshold = _get("neurd_threshold", self.neurd_threshold)
+    alpha           = _get("alpha",           self.alpha)
 
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
       self.env, self.agent, state.params, collect_key, self.batch_size,
-      alpha=self.alpha,
+      alpha=alpha,
     )
 
     # ── Retrace targets: target-net Q-values, on-policy rollout policy ──────
@@ -214,6 +216,7 @@ class QMMD(PPOBase):
         episodes.actions,              # (B,T,P)
         episodes.legal_actions,        # (B,T,P,A)
         episodes.dones,                # (B,T)
+        alpha,
       )
     )  # (B,T,P)
 
@@ -262,7 +265,7 @@ class QMMD(PPOBase):
             ent_coef,
             magnet_coef,
             old_policy_coef,
-            self.alpha,
+            alpha,
           )
         elif self.loss_type == LossType.RNAD:
           # 9 arrays + 7 scalars
@@ -286,7 +289,7 @@ class QMMD(PPOBase):
             magnet_coef,
             neurd_clip,
             neurd_threshold,
-            self.alpha,
+            alpha,
           )
 
         if self.alternating:

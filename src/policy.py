@@ -25,8 +25,6 @@ sparse supports. See ``policy_entropy_loss`` and ``policy_kl``.
 
 from __future__ import annotations
 
-import functools
-
 import jax
 import jax.numpy as jnp
 import jax.lax as lax
@@ -40,13 +38,16 @@ _ENTMAX_ITERS = 30
 # ── α-entmax projection ──────────────────────────────────────────────────────
 
 
-def _entmax_threshold_probs(z: jax.Array, alpha: float, n_iter: int) -> jax.Array:
+def _entmax_threshold_probs(z: jax.Array, alpha: jax.Array, n_iter: int) -> jax.Array:
   """Bisection for p(τ) = [ (α−1)·z − τ ]_+^{1/(α−1)} normalised to sum 1.
 
   ``z`` is expected to be masked already (illegal actions set to ``-inf``);
-  those map to probability 0 through the clamp.
+  those map to probability 0 through the clamp. ``alpha`` may be a traced scalar
+  (e.g. an annealing schedule), so all arithmetic is JAX-traceable — no Python
+  branching on its value. The ``maximum`` guard only prevents a literal divide
+  by zero should a schedule pass exactly through α = 1.
   """
-  am1 = alpha - 1.0
+  am1 = jnp.maximum(alpha - 1.0, 1e-6)
   z = z * am1
   d = z.shape[-1]
   max_val = jnp.max(z, axis=-1, keepdims=True)
@@ -72,23 +73,25 @@ def _entmax_threshold_probs(z: jax.Array, alpha: float, n_iter: int) -> jax.Arra
   return p / p.sum(axis=-1, keepdims=True)
 
 
-@functools.partial(jax.custom_vjp, nondiff_argnums=(1, 2))
-def _entmax(z: jax.Array, alpha: float, n_iter: int) -> jax.Array:
-  return _entmax_threshold_probs(z, alpha, n_iter)
+@jax.custom_vjp
+def _entmax(z: jax.Array, alpha: jax.Array) -> jax.Array:
+  return _entmax_threshold_probs(z, alpha, _ENTMAX_ITERS)
 
 
-def _entmax_fwd(z, alpha, n_iter):
-  p = _entmax_threshold_probs(z, alpha, n_iter)
-  return p, p
+def _entmax_fwd(z, alpha):
+  p = _entmax_threshold_probs(z, alpha, _ENTMAX_ITERS)
+  return p, (p, alpha)
 
 
-def _entmax_bwd(alpha, n_iter, p, g):
+def _entmax_bwd(res, g):
   # Closed-form entmax Jacobian-vector product (Peters et al., 2019, eq. 14):
   #   s_i = p_i^{2−α} on the support (0 elsewhere); dz = g·s − (⟨g, s⟩/⟨1, s⟩)·s
+  p, alpha = res
   s = jnp.where(p > 0, p ** (2.0 - alpha), 0.0)
   gs = g * s
   shift = gs.sum(axis=-1, keepdims=True) / s.sum(axis=-1, keepdims=True)
-  return (gs - shift * s,)
+  # α is a schedule of the step, never a function of params → zero cotangent.
+  return (gs - shift * s, jnp.zeros_like(alpha))
 
 
 _entmax.defvjp(_entmax_fwd, _entmax_bwd)
@@ -97,14 +100,25 @@ _entmax.defvjp(_entmax_fwd, _entmax_bwd)
 # ── Public transforms ────────────────────────────────────────────────────────
 
 
+def _is_static_softmax(alpha) -> bool:
+  """True only for a concrete (non-traced) ``alpha`` equal to 1.0.
+
+  Algorithms normalise ``alpha`` to a ``float`` at construction, so a static
+  value is always a ``float`` here. A scheduled ``alpha`` is a JAX tracer (not a
+  ``float``), so it always takes the entmax/Tsallis path — and we never evaluate
+  ``alpha == 1.0`` on a tracer, which would be a traced bool, not a Python one.
+  """
+  return isinstance(alpha, float) and alpha == 1.0
+
+
 def policy_probs(
   logits: jax.Array, legal_actions: jax.Array, alpha: float = 1.0
 ) -> jax.Array:
   """π = softmax(logits) for α = 1, else α-entmax. Illegal actions get 0."""
-  if alpha == 1.0:
+  if _is_static_softmax(alpha):
     return jax.nn.softmax(logits, where=legal_actions)
   z = jnp.where(legal_actions, logits, -jnp.inf)
-  return _entmax(z, float(alpha), _ENTMAX_ITERS)
+  return _entmax(z, jnp.asarray(alpha, logits.dtype))
 
 
 def policy_log_probs(
@@ -116,7 +130,7 @@ def policy_log_probs(
   double-``where`` keeps the gradient finite (0) at those points, so importance
   ratios that read a single action's log-prob stay safe.
   """
-  if alpha == 1.0:
+  if _is_static_softmax(alpha):
     return safe_log_softmax(logits, legal_actions)
   p = policy_probs(logits, legal_actions, alpha)
   safe_p = jnp.where(p > 0, p, 1.0)
@@ -132,10 +146,11 @@ def policy_entropy_loss(
   α = 1 → Shannon entropy −Σ p log p (uses ``log_probs`` for stability).
   α > 1 → Tsallis entropy  (1 − Σ pⱼ^α) / (α(α−1)), finite on sparse supports.
   """
-  if alpha == 1.0:
+  if _is_static_softmax(alpha):
     entropy = -(probs * log_probs).sum(-1)
   else:
-    entropy = (1.0 - (probs**alpha).sum(-1)) / (alpha * (alpha - 1.0))
+    am1 = jnp.maximum(alpha - 1.0, 1e-6)
+    entropy = (1.0 - (probs**alpha).sum(-1)) / (alpha * am1)
   return -entropy
 
 
@@ -149,10 +164,11 @@ def tsallis_kl(p: jax.Array, q: jax.Array, alpha: float) -> jax.Array:
   that makes a sparse reference policy usable as a magnet. As α→1 it recovers
   KL(p‖q).
   """
+  am1 = jnp.maximum(alpha - 1.0, 1e-6)
   term_p = (p**alpha).sum(-1) / alpha
   term_q = (1.0 - 1.0 / alpha) * (q**alpha).sum(-1)
-  cross = (q ** (alpha - 1.0) * p).sum(-1)
-  return (term_p + term_q - cross) / (alpha - 1.0)
+  cross = (q**am1 * p).sum(-1)
+  return (term_p + term_q - cross) / am1
 
 
 def policy_kl(
@@ -167,6 +183,6 @@ def policy_kl(
   Callers pass both probabilities and log-probabilities so the α = 1 path is
   bit-identical to the previous ``kl_divergence(log_p, log_q)``.
   """
-  if alpha == 1.0:
+  if _is_static_softmax(alpha):
     return kl_divergence(log_p, log_q)
   return tsallis_kl(p, q, alpha)

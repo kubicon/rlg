@@ -161,11 +161,12 @@ class MMD(PPOBase):
     magnet_update_rate = _get("magnet_update_rate", self.magnet_update_rate)
     neurd_clip      = _get("neurd_clip",      self.neurd_clip)
     neurd_threshold = _get("neurd_threshold", self.neurd_threshold)
+    alpha           = _get("alpha",           self.alpha)
 
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
       self.env, self.agent, state.params, collect_key, self.batch_size,
-      alpha=self.alpha,
+      alpha=alpha,
     )
 
     # Both auxiliary networks are fixed across all epochs — precompute once.
@@ -190,11 +191,11 @@ class MMD(PPOBase):
     # All quantities here are stop-gradiented (rollout + magnet), so no policy
     # gradient leaks into the value target.
     if self.regularize_value:
-      mu = policy_probs(episodes.agent_output.logits, episodes.legal_actions, self.alpha)
-      log_mu = policy_log_probs(episodes.agent_output.logits, episodes.legal_actions, self.alpha)
-      ref = policy_probs(magnet_logits, episodes.legal_actions, self.alpha)
-      log_ref = policy_log_probs(magnet_logits, episodes.legal_actions, self.alpha)
-      node_kl = policy_kl(mu, log_mu, ref, log_ref, self.alpha)  # (B, T, P) — D(μ(·|s) ‖ π_ref)
+      mu = policy_probs(episodes.agent_output.logits, episodes.legal_actions, alpha)
+      log_mu = policy_log_probs(episodes.agent_output.logits, episodes.legal_actions, alpha)
+      ref = policy_probs(magnet_logits, episodes.legal_actions, alpha)
+      log_ref = policy_log_probs(magnet_logits, episodes.legal_actions, alpha)
+      node_kl = policy_kl(mu, log_mu, ref, log_ref, alpha)  # (B, T, P) — D(μ(·|s) ‖ π_ref)
       # Two-player zero-sum regularized value Φ = V − τ·R_self + τ·R_opp: each
       # player pays its own KL and is credited the opponents' KL, so the value
       # carries BOTH players' regularization (paper Sec. 2.2) and stays zero-sum
@@ -248,7 +249,7 @@ class MMD(PPOBase):
             ent_coef,
             magnet_coef,
             old_policy_coef,
-            self.alpha,
+            alpha,
           )
         elif self.loss_type == LossType.RNAD:
           _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
@@ -271,7 +272,7 @@ class MMD(PPOBase):
             magnet_coef,
             neurd_clip,
             neurd_threshold,
-            self.alpha,
+            alpha,
           )
         if self.alternating:
           wmean = lambda x: self._wmean(x * player_mask, valid)

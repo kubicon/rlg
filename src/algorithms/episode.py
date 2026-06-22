@@ -18,7 +18,7 @@ import jax.numpy as jnp
 
 from ..agents.base import Agent
 from ..envs.base import Env, EnvState
-from ..policy import policy_probs
+from ..policy import policy_probs, _is_static_softmax
 
 
 class Episode(NamedTuple):
@@ -180,7 +180,7 @@ def collect_episode(
       policy_logits = jnp.where(is_br[:, None], agent_out.logits, opp_out.logits)
 
     player_keys = jax.random.split(act_key, P)
-    if alpha == 1.0:
+    if _is_static_softmax(alpha):
       logits_masked = jnp.where(legal_actions, policy_logits, -jnp.inf)
       actions = jax.vmap(jax.random.categorical)(player_keys, logits_masked)
     else:

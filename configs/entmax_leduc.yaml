@@ -18,7 +18,19 @@ algorithm:
   old_policy_coef: 0.05
   target_update_rate: 0.001
   magnet_interval: 2000
-  alpha: 1.5            # α-entmax policy (sparse); 1.0 = softmax
+  # α-entmax policy. 1.0 = softmax, >1 = sparse. The static value below is the
+  # converged α used at eval time; the schedule anneals it during training.
+  alpha: 1.5
+  # Anneal α from near-softmax (stable early learning) to the target sparsity.
+  # Start at 1.05 rather than 1.0: a scheduled α always runs the entmax path
+  # (it is traced, so the exact softmax fast-path can't fire), and the entmax
+  # projection is numerically clean only for α ≳ 1.05.
+  schedules:
+    alpha:
+      type: linear
+      init_value: 1.05
+      end_value: 1.5
+      transition_steps: 20000
   agent:
     network:
       type: twin_head
