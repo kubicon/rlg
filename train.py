@@ -31,8 +31,6 @@ from src.agents.actor_critic import (
 from src.algorithms.ppo import PPO
 from src.algorithms.mmd import MMD
 from src.algorithms.mmd_q import QMMD
-from src.algorithms.gumbel_q import GumbelQMMD
-from src.algorithms.npg import NPG
 from src.trainers.trainer import StandardTrainer, StdoutLogger
 from opt_muon import optimistic_muon 
 
@@ -41,8 +39,6 @@ _ALGORITHMS = {
   "ppo": PPO,
   "mmd": MMD,
   "qmmd": QMMD,
-  "gumbel_qmmd": GumbelQMMD,
-  "npg": NPG,
 }
 
 _AGENT_CLASSES = {
@@ -55,8 +51,6 @@ _AGENT_CLASSES = {
   "ppo": ActorCriticAgent,
   "mmd": ActorCriticAgent,
   "qmmd": PolicyQAgent,
-  "gumbel_qmmd": PolicyQAgent,
-  "npg": PolicyQAgent,
 }
 
 _OPTIMIZERS = {
@@ -173,7 +167,7 @@ def main(config_path: str = "configs/ppo_goofspiel.yaml", resume: bool = False) 
   schedules_cfg = alg_cfg.pop("schedules", None)
   schedules = build_schedules(schedules_cfg) if schedules_cfg else {}
   alg_class = _ALGORITHMS[alg_type]
-  # Some algorithms (e.g. NPG) are schedule-free and do not accept `schedules`.
+  # Some algorithms are schedule-free and do not accept `schedules`.
   if "schedules" in inspect.signature(alg_class.__init__).parameters:
     alg_cfg["schedules"] = schedules
   elif schedules:
