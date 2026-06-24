@@ -20,7 +20,7 @@ algorithm:
   type: mmd
   loss_type: rm
   n_epochs: 1
-  batch_size: 64
+  batch_size: 512
   optimizer:
     type: adam
     lr: 0.0003
@@ -33,6 +33,7 @@ algorithm:
   gae_lambda: 1.0
   magnet_coef: 0.2
   old_policy_coef: 0.05
+  regularize_value: true
   target_update_rate: 0.001
   magnet_interval: 2000
   agent:
@@ -52,8 +53,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 40000
+  n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/rm_leduc
+  checkpoint_dir: private_experiments/rm_leduc
   save_metrics: true

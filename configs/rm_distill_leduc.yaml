@@ -13,7 +13,7 @@ algorithm:
   type: mmd
   loss_type: rm_distill
   n_epochs: 1
-  batch_size: 64
+  batch_size: 512
   optimizer:
     type: adam
     lr: 0.0003
@@ -24,8 +24,14 @@ algorithm:
   gae_lambda: 1.0
   magnet_coef: 0.2
   old_policy_coef: 0.05
+  # Step size of the incremental RM⁺ distillation target π_RM ∝ [π + η·regret]₊.
+  # The target is the identity at the equilibrium (regret→0 ⇒ π_RM=π), so the
+  # cross-entropy pull vanishes there and the magnet holds the strategy. Larger η
+  # = more aggressive distillation per step; smaller = closer to a proximal step.
+  rm_step_size: 1.0
   target_update_rate: 0.001
   magnet_interval: 2000
+  regularize_value: true
   # Softmax actor. (rm_distill also runs under α-entmax if you set alpha > 1; the
   # cross-entropy distillation is restricted to the policy's support there.)
   alpha: 1.0
@@ -46,8 +52,8 @@ algorithm:
       head2:
         type: value
 trainer:
-  n_steps: 40000
+  n_steps: 200000
   log_every: 2000
   checkpoint_every: 2000
-  checkpoint_dir: public_experiments/rm_distill_leduc
+  checkpoint_dir: private_experiments/rm_distill_leduc
   save_metrics: true

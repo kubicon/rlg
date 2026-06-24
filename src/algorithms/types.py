@@ -16,7 +16,7 @@ class MagnetUpdateType(StrEnum):
 
 MMD_SCHEDULABLE = frozenset({
   "clip_eps", "vf_coef", "ent_coef",
-  "magnet_coef", "old_policy_coef",
+  "magnet_coef", "old_policy_coef", "rm_step_size",
   "target_update_rate", "magnet_update_rate",
   "neurd_clip", "neurd_threshold",
   "alpha",

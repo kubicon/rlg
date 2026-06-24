@@ -4,11 +4,19 @@ This is the complement to the regret-matching policy *parametrization* used by
 ``loss_type=rm`` (see ``policy.py``'s RM transform). Here the actor stays a
 softmax / α-entmax policy and regret matching enters only as a **target**:
 
-    π_RM(a) ∝ [regret(a)]₊        (uniform over legal actions if all ≤ 0),
+    π_RM(a) ∝ [π(a) + η·regret(a)]₊      (η = rm_step_size),
 
-and the policy is pulled toward it by the cross-entropy H(π_RM, π) = −Σ π_RM·log π.
-Because π_RM is a stop-gradient target this has the same minimiser as the forward
-KL(π_RM ‖ π) but avoids ``log π_RM`` on the (exact) zeros that RM produces.
+a single regret-matching⁺ step taken *from the current policy*, and the policy is
+pulled toward it by the cross-entropy H(π_RM, π) = −Σ π_RM·log π. Because π_RM is a
+stop-gradient target this has the same minimiser as the forward KL(π_RM ‖ π) but
+avoids ``log π_RM`` on the (exact) zeros that RM produces.
+
+The step is *incremental* on purpose. The absolute RM map [regret]₊/Σ[regret]₊ has
+no fixed point at the equilibrium: there the regrets vanish, so the target degrades
+to uniform and the cross-entropy keeps dragging the policy toward uniform (the
+magnet cannot overcome an O(1) pull). The incremental target equals π when the
+regrets are 0, so the distillation term vanishes at the fixed point and the magnet
+holds the strategy — mirroring how mmd_loss's PPO advantage term goes to 0.
 
 Why have both:
   * ``rm``         — the actor *is* the regret-matching map [z]₊/Σ[z]₊. Literal RM,
@@ -49,6 +57,7 @@ def rm_distill_loss(
   ent_coef: float,
   magnet_coef: float,
   old_policy_coef: float,
+  rm_step_size: float = 1.0,
   alpha: float = 1.0,
 ) -> tuple[jax.Array, dict]:
   strategy = policy_probs(logits, legal_actions, alpha)  # (A,)
@@ -67,9 +76,20 @@ def rm_distill_loss(
   )
   regrets = lax.stop_gradient(regrets)
 
-  # Closed-form regret-matching strategy: π_RM ∝ [regret]₊ over legal actions,
-  # falling back to uniform-over-legal when no action has positive regret.
-  pos = jnp.where(legal_actions, jnp.maximum(regrets, 0.0), 0.0)
+  # *Incremental* RM⁺ target: a single regret-matching step taken FROM the current
+  # policy, π_RM ∝ [π + η·regret]₊ (η = rm_step_size), rather than the absolute RM
+  # map [regret]₊/Σ[regret]₊. This is essential for convergence: with the absolute
+  # map, at (or near) the equilibrium all regrets → 0, so the target collapses to
+  # *uniform* and the cross-entropy term keeps applying an O(1) pull toward uniform
+  # that the magnet cannot overcome — the policy never settles on a non-uniform
+  # equilibrium. The incremental target is the *identity at the fixed point*: when
+  # regret = 0 it returns π, so H(π_RM, π) and its gradient (π − sg π) vanish and
+  # the magnet/proximal terms hold the strategy, exactly as the PPO advantage term
+  # does in mmd_loss. Positive regrets nudge mass toward those actions; η scales
+  # the step. Falls back to uniform-over-legal only in the degenerate case where
+  # the whole shifted vector is ≤ 0.
+  shifted = lax.stop_gradient(strategy) + rm_step_size * regrets
+  pos = jnp.where(legal_actions, jnp.maximum(shifted, 0.0), 0.0)
   z = pos.sum()
   n_legal = jnp.maximum(legal_actions.sum(), 1.0)
   uniform = legal_actions / n_legal
