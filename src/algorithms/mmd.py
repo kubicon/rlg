@@ -34,8 +34,7 @@ from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
-from ..losses.rm_distill import rm_distill_loss
-from ..policy import policy_probs, policy_log_probs, policy_kl, RM_ALPHA
+from ..policy import policy_probs, policy_log_probs, policy_kl
 from .types import LossType, MagnetUpdateType, MMD_SCHEDULABLE
 
 
@@ -84,7 +83,6 @@ class MMD(PPOBase):
     trace_clip: float = 1.0,
     magnet_coef: float = 0.15,
     old_policy_coef: float = 0.05,
-    rm_step_size: float = 1.0,
     target_update_rate: float = 0.001,
     magnet_interval: int = 2000,
     magnet_update_rate: float = 0.001,
@@ -118,7 +116,6 @@ class MMD(PPOBase):
     )
     self.magnet_coef = magnet_coef
     self.old_policy_coef = old_policy_coef
-    self.rm_step_size = rm_step_size
     self.target_update_rate = target_update_rate
     self.magnet_interval = magnet_interval
     self.magnet_update_rate = magnet_update_rate
@@ -160,15 +157,11 @@ class MMD(PPOBase):
     ent_coef        = _get("ent_coef",         self.ent_coef)
     magnet_coef     = _get("magnet_coef",     self.magnet_coef)
     old_policy_coef = _get("old_policy_coef", self.old_policy_coef)
-    rm_step_size    = _get("rm_step_size",    self.rm_step_size)
     target_update_rate = _get("target_update_rate", self.target_update_rate)
     magnet_update_rate = _get("magnet_update_rate", self.magnet_update_rate)
     neurd_clip      = _get("neurd_clip",      self.neurd_clip)
     neurd_threshold = _get("neurd_threshold", self.neurd_threshold)
-    # RM forces its own policy parametrization (π = [z]₊/Σ[z]₊): the regret head
-    # replaces the softmax, so the entmax `alpha` knob does not apply. The
-    # sentinel threads the transform through rollout, eval and the loss alike.
-    alpha           = RM_ALPHA if self.loss_type == LossType.RM else _get("alpha", self.alpha)
+    alpha           = _get("alpha",           self.alpha)
 
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
@@ -236,36 +229,7 @@ class MMD(PPOBase):
       def total_loss(params):
         agent_out = self._eval_params(params, episodes)
 
-        if self.loss_type == LossType.RM_DISTILL:
-          # Softmax/entmax actor distilled toward an incremental RM⁺ target. Same
-          # weight-space magnet KL as MMD; the only extra scalar is rm_step_size.
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
-          loss_P = jax.vmap(rm_distill_loss, in_axes=_axes)
-          loss_TP = jax.vmap(loss_P, in_axes=_axes)
-          loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
-          losses, metrics = loss_BTP(
-            agent_out.value,
-            agent_out.logits,
-            episodes.legal_actions,
-            episodes.actions,
-            episodes.agent_output.logits,  # trajectory sampling policy
-            episodes.agent_output.value,
-            magnet_logits,
-            advantages,
-            targets,
-            clip_eps,
-            vf_coef,
-            ent_coef,
-            magnet_coef,
-            old_policy_coef,
-            rm_step_size,
-            alpha,
-          )
-        elif self.loss_type in (LossType.MMD, LossType.RM):
-          # Both share mmd_loss's signature/axes and the weight-space magnet KL:
-          #   MMD — softmax/entmax actor, PPO advantage update (no RM).
-          #   RM  — actor IS the RM map [z]₊/Σ[z]₊ (carried by `alpha`), same PPO
-          #         advantage update → mmd_loss.
+        if self.loss_type == LossType.MMD:
           _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
           loss_P = jax.vmap(mmd_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
