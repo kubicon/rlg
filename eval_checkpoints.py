@@ -129,6 +129,21 @@ def _apply_threshold(probs: np.ndarray, mode: str, epsilon: float) -> np.ndarray
   return filtered / total
 
 
+def _rm_probs(logits: np.ndarray, mask: np.ndarray) -> np.ndarray:
+  """Regret-matching map π = [z]₊/Σ[z]₊ (numpy), matching policy.py's RM transform.
+
+  Used when the checkpoint was trained with loss_type=rm, where the network head
+  is a regret vector rather than softmax logits. Falls back to uniform over legal
+  actions when no legal action has positive regret.
+  """
+  pos = np.where(mask, np.maximum(logits, 0.0), 0.0)
+  z = pos.sum()
+  if z > 0.0:
+    return pos / z
+  d = max(int(mask.sum()), 1)
+  return np.where(mask, 1.0 / d, 0.0)
+
+
 def _entmax_probs(logits: np.ndarray, mask: np.ndarray, alpha: float) -> np.ndarray:
   """α-entmax over legal actions (numpy), matching src/policy.py at eval time."""
   am1 = alpha - 1.0
@@ -157,6 +172,7 @@ def _params_to_strategy(
   threshold_mode: str = "epsilon",
   epsilon: float = 0.0,
   alpha: float = 1.0,
+  use_rm: bool = False,
 ) -> Strategy:
   """Single batched forward pass → Strategy dict."""
   if not ids:
@@ -167,7 +183,9 @@ def _params_to_strategy(
   for idx, iset_id in enumerate(ids):
     logits = logits_batch[idx]
     mask = mask_batch[idx]
-    if alpha == 1.0:
+    if use_rm:
+      probs = _rm_probs(logits, mask)
+    elif alpha == 1.0:
       logits = np.where(mask, logits, -1e9)
       logits -= logits.max()
       probs = np.where(mask, np.exp(logits), 0.0)
@@ -215,9 +233,15 @@ def main(
   # checkpoint with α(step) — the value the agent was actually playing at that
   # step — rather than the converged value. Otherwise α is constant.
   alpha = float(alg_cfg.get("alpha", 1.0))
+  # loss_type=rm uses the regret-matching map π=[z]₊/Σ[z]₊ as the actor, not
+  # softmax/entmax. Reconstruct the same map at eval; `alpha` does not apply.
+  # (loss_type=rm_distill keeps a softmax/entmax actor, so it uses alpha as usual.)
+  use_rm = alg_cfg.get("loss_type", "mmd").lower() == "rm"
   alpha_schedule = None
   sched_cfg = alg_cfg.get("schedules") or {}
-  if "alpha" in sched_cfg:
+  if use_rm:
+    print("policy transform: regret matching (π = [z]₊/Σ[z]₊)")
+  elif "alpha" in sched_cfg:
     alpha_schedule = build_schedules({"alpha": sched_cfg["alpha"]})["alpha"]
     print("policy transform: α-entmax (annealed; α reconstructed per checkpoint)")
   elif alpha != 1.0:
@@ -274,8 +298,8 @@ def main(
     step = int(state.step)
     ckpt_alpha = float(alpha_schedule(step)) if alpha_schedule is not None else alpha
 
-    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn, threshold_mode, epsilon, ckpt_alpha)
-    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn, threshold_mode, epsilon, ckpt_alpha)
+    strat0 = _params_to_strategy(params, ids0, obs0, mask0, apply_fn, threshold_mode, epsilon, ckpt_alpha, use_rm)
+    strat1 = _params_to_strategy(params, ids1, obs1, mask1, apply_fn, threshold_mode, epsilon, ckpt_alpha, use_rm)
 
     if isinstance(env, LeducHoldem):
       _RANK_NAMES = ["J", "Q", "K"]
