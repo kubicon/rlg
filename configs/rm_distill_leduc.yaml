@@ -1,0 +1,53 @@
+# Regret matching as the training signal, SOFTMAX actor (rm_distill).
+#
+# The policy stays a softmax over the network logits; regret matching enters only
+# as a target π_RM ∝ [regret]₊ that the policy is distilled toward (cross-entropy).
+# Full-support smooth gradients (no dead-regret problem). Last-iterate convergence
+# comes from the weight-space magnet KL (magnet_coef) + proximal term
+# (old_policy_coef), exactly as in MMD.
+seed: 0
+env:
+  name: leduc
+  reward_type: difference
+algorithm:
+  type: mmd
+  loss_type: rm_distill
+  n_epochs: 1
+  batch_size: 64
+  optimizer:
+    type: adam
+    lr: 0.0003
+  clip_eps: 0.1
+  vf_coef: 0.5
+  ent_coef: 0.03
+  gamma: 1.0
+  gae_lambda: 1.0
+  magnet_coef: 0.2
+  old_policy_coef: 0.05
+  target_update_rate: 0.001
+  magnet_interval: 2000
+  # Softmax actor. (rm_distill also runs under α-entmax if you set alpha > 1; the
+  # cross-entropy distillation is restricted to the policy's support there.)
+  alpha: 1.0
+  agent:
+    network:
+      type: twin_head
+      torso:
+        type: mlp
+        feature_dim: 128
+        hidden:
+        - 128
+        - 128
+        activation: gelu
+        norm: rms
+      head1:
+        type: categorical
+        n_actions: null
+      head2:
+        type: value
+trainer:
+  n_steps: 40000
+  log_every: 2000
+  checkpoint_every: 2000
+  checkpoint_dir: public_experiments/rm_distill_leduc
+  save_metrics: true

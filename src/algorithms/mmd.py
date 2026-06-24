@@ -34,7 +34,8 @@ from .ppo import PPOBase
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
-from ..policy import policy_probs, policy_log_probs, policy_kl
+from ..losses.rm_distill import rm_distill_loss
+from ..policy import policy_probs, policy_log_probs, policy_kl, RM_ALPHA
 from .types import LossType, MagnetUpdateType, MMD_SCHEDULABLE
 
 
@@ -161,7 +162,10 @@ class MMD(PPOBase):
     magnet_update_rate = _get("magnet_update_rate", self.magnet_update_rate)
     neurd_clip      = _get("neurd_clip",      self.neurd_clip)
     neurd_threshold = _get("neurd_threshold", self.neurd_threshold)
-    alpha           = _get("alpha",           self.alpha)
+    # RM forces its own policy parametrization (π = [z]₊/Σ[z]₊): the regret head
+    # replaces the softmax, so the entmax `alpha` knob does not apply. The
+    # sentinel threads the transform through rollout, eval and the loss alike.
+    alpha           = RM_ALPHA if self.loss_type == LossType.RM else _get("alpha", self.alpha)
 
     rng, collect_key = jax.random.split(state.rng)
     _, _, _, episodes = collect_episodes(
@@ -229,9 +233,16 @@ class MMD(PPOBase):
       def total_loss(params):
         agent_out = self._eval_params(params, episodes)
 
-        if self.loss_type == LossType.MMD:
+        if self.loss_type in (LossType.MMD, LossType.RM, LossType.RM_DISTILL):
+          # All three share mmd_loss's signature/axes and the weight-space magnet
+          # KL. They differ in how regret matching enters:
+          #   MMD        — softmax/entmax actor, PPO advantage update (no RM).
+          #   RM         — actor IS the RM map [z]₊/Σ[z]₊ (carried by `alpha`),
+          #                same PPO advantage update → mmd_loss.
+          #   RM_DISTILL — softmax/entmax actor distilled toward an RM target.
+          loss_fn = rm_distill_loss if self.loss_type == LossType.RM_DISTILL else mmd_loss
           _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
-          loss_P = jax.vmap(mmd_loss, in_axes=_axes)
+          loss_P = jax.vmap(loss_fn, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
           losses, metrics = loss_BTP(

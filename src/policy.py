@@ -34,6 +34,46 @@ from .utils import safe_log_softmax, kl_divergence
 # Bisection iterations for the entmax threshold. ~30 gives float32-tight roots.
 _ENTMAX_ITERS = 30
 
+# ── Regret-matching transform ────────────────────────────────────────────────
+#
+# A third policy parametrization, selected through the same ``alpha`` plumbing by
+# an out-of-domain sentinel (entmax needs α ≥ 1, so a negative value is free to
+# repurpose). The network's logits are reinterpreted as **regrets** z and the
+# policy is the regret-matching map
+#
+#     π(a) = [z(a)]₊ / Σ_b [z(b)]₊      (uniform over legal actions if all ≤ 0),
+#
+# i.e. the L1-normalised positive part. Algorithms never expose this number to
+# users — they pass it internally when ``loss_type == rm``. Like α-entmax it
+# produces *exact zeros*, so it shares the same -inf log-prob / Tsallis-style
+# sparse handling. Note the regret-matching map is flat (zero gradient) wherever
+# z ≤ 0, so a regret that goes negative receives no gradient to recover — the
+# magnet term mitigates but does not remove this; large/positive init helps.
+RM_ALPHA: float = -1.0
+
+
+def _is_rm(alpha) -> bool:
+  """True only for the concrete RM sentinel (never a traced/scheduled alpha)."""
+  return isinstance(alpha, float) and alpha == RM_ALPHA
+
+
+def _rm_probs(logits: jax.Array, legal_actions: jax.Array) -> jax.Array:
+  """Regret-matching strategy π = [z]₊ / Σ[z]₊ over legal actions.
+
+  ``logits`` are read as regrets z. Illegal actions get 0; if no legal action
+  has positive regret the strategy falls back to uniform over legal actions.
+  """
+  pos = jnp.where(legal_actions, jax.nn.relu(logits), 0.0)
+  z = pos.sum(axis=-1, keepdims=True)
+  n_legal = jnp.maximum(legal_actions.sum(axis=-1, keepdims=True), 1.0)
+  uniform = legal_actions / n_legal
+  return jnp.where(z > 0.0, pos / jnp.where(z > 0.0, z, 1.0), uniform)
+
+
+# Finite floor for log q on q's zeros, so forward KL(p‖q) stays finite when the
+# reference puts no mass where p does (≈ log(1e-12)).
+_RM_LOG_FLOOR = -27.631021
+
 
 # ── α-entmax projection ──────────────────────────────────────────────────────
 
@@ -114,7 +154,12 @@ def _is_static_softmax(alpha) -> bool:
 def policy_probs(
   logits: jax.Array, legal_actions: jax.Array, alpha: float = 1.0
 ) -> jax.Array:
-  """π = softmax(logits) for α = 1, else α-entmax. Illegal actions get 0."""
+  """π = softmax(logits) for α = 1, RM map for the sentinel, else α-entmax.
+
+  Illegal actions get 0.
+  """
+  if _is_rm(alpha):
+    return _rm_probs(logits, legal_actions)
   if _is_static_softmax(alpha):
     return jax.nn.softmax(logits, where=legal_actions)
   z = jnp.where(legal_actions, logits, -jnp.inf)
@@ -129,6 +174,8 @@ def policy_log_probs(
   For α > 1, legal actions with zero mass yield ``-inf`` (honest). The
   double-``where`` keeps the gradient finite (0) at those points, so importance
   ratios that read a single action's log-prob stay safe.
+
+  The RM map (sentinel α) is likewise sparse and takes the same -inf path.
   """
   if _is_static_softmax(alpha):
     return safe_log_softmax(logits, legal_actions)
@@ -145,7 +192,16 @@ def policy_entropy_loss(
 
   α = 1 → Shannon entropy −Σ p log p (uses ``log_probs`` for stability).
   α > 1 → Tsallis entropy  (1 − Σ pⱼ^α) / (α(α−1)), finite on sparse supports.
+  RM    → Shannon entropy, masked to p's support so the 0·log 0 = 0 (illegal /
+          zero-regret actions) stays finite.
   """
+  if _is_rm(alpha):
+    # Sanitise log p to a finite value where p = 0 *before* multiplying: the
+    # masking `where` alone is not enough — p·log_p = 0·(−∞) poisons the
+    # backward pass (0·∞ = nan) even when the forward value is masked away.
+    safe_log = jnp.where(probs > 0, log_probs, 0.0)
+    entropy = -(probs * safe_log).sum(-1)
+    return -entropy
   if _is_static_softmax(alpha):
     entropy = -(probs * log_probs).sum(-1)
   else:
@@ -182,7 +238,18 @@ def policy_kl(
 
   Callers pass both probabilities and log-probabilities so the α = 1 path is
   bit-identical to the previous ``kl_divergence(log_p, log_q)``.
+
+  RM (sentinel α): forward KL Σ p (log p − log q), masked to p's support and with
+  log q floored where q = 0, so a sparse reference (magnet) keeps the divergence
+  finite while still penalising mass that the reference does not support.
   """
+  if _is_rm(alpha):
+    # Sanitise both logs to finite values before the product, else 0·(−∞) = nan
+    # leaks into the gradient (see policy_entropy_loss). log q is floored on q's
+    # zeros so mass where the reference has none is penalised, not infinite.
+    safe_log_p = jnp.where(p > 0.0, log_p, 0.0)
+    safe_log_q = jnp.where(q > 0.0, log_q, _RM_LOG_FLOOR)
+    return (p * (safe_log_p - safe_log_q)).sum(-1)
   if _is_static_softmax(alpha):
     return kl_divergence(log_p, log_q)
   return tsallis_kl(p, q, alpha)

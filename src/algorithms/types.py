@@ -5,6 +5,8 @@ class LossType(StrEnum):
   PPO = "ppo"
   RNAD = "rnad"
   MMD = "mmd"
+  RM = "rm"
+  RM_DISTILL = "rm_distill"
 
 
 class MagnetUpdateType(StrEnum):
