@@ -8,9 +8,15 @@ env:
   reward_type: difference # net chips, scaled to [-1, 1] by the stack
 algorithm:
   n_epochs: 2
-  batch_size: 64
-  lr: 0.0003
-  grad_clip: 1.0
+  batch_size: 16384
+  # Optimizer block (type + args). Supports adam/adamw/sgd/muon/optadam/optgd/optmuon
+  # via train.py's registry. `max_grad_norm` adds global-norm clipping.
+  # Omit this block to fall back to plain Adam at `lr` (+ optional `grad_clip`).
+  optimizer:
+    type: adamw
+    lr: 0.0001
+    weight_decay: 0.01
+    max_grad_norm: 1.0
   clip_eps: 0.2
   vf_coef: 0.5
   ent_coef: 0.005
@@ -21,16 +27,17 @@ algorithm:
   magnet_coef: 0.2
   old_policy_coef: 0.05
   target_update_rate: 0.001
-  magnet_interval: 2000
+  magnet_interval: 10000
   hidden:
-  - 256
-  - 256
+  - 1024
+  - 1024
+  - 1024
   # Bet-size Gaussian std clamp (fraction-of-stack space)
   log_sigma_min: -4.6   # σ ≈ 0.01  (~1% of stack)
   log_sigma_max: -1.4   # σ ≈ 0.25  (quarter-stack std)
   log_sigma_init: -2.3  # σ ≈ 0.10  (~10% of stack)
 trainer:
-  n_steps: 20000
-  log_every: 200
-  checkpoint_every: 2000
+  n_steps: 20000000
+  log_every: 10000
+  checkpoint_every: 10000
   checkpoint_dir: public_experiments/mmd_cont_hunl

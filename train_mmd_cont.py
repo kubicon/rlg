@@ -41,6 +41,7 @@ import yaml
 from src.envs import build_env
 from src.advantage import vtrace
 from src.losses.mmd_cont import mmd_cont_loss
+from train import build_optimizer  # shared optimizer registry (adam/adamw/muon/…)
 
 
 # ── Network ──────────────────────────────────────────────────────────────────
@@ -283,9 +284,18 @@ def main(config_path: str | None = None) -> None:
   )
   forward = make_forward(net)
 
-  optimizer = optax.adam(alg["lr"])
-  if alg.get("grad_clip"):
-    optimizer = optax.chain(optax.clip_by_global_norm(float(alg["grad_clip"])), optimizer)
+  # Either an explicit `optimizer:` block (type + args, à la train.py) or the
+  # flat `lr` (+ optional `grad_clip`) default.
+  opt_cfg = alg.get("optimizer")
+  if opt_cfg is not None:
+    optimizer = build_optimizer(opt_cfg)
+    opt_name = opt_cfg.get("type", "adam")
+  else:
+    optimizer = optax.adam(alg["lr"])
+    if alg.get("grad_clip"):
+      optimizer = optax.chain(optax.clip_by_global_norm(float(alg["grad_clip"])), optimizer)
+    opt_name = "adam"
+  print(f"optimizer: {opt_name}")
 
   key = jax.random.PRNGKey(cfg.get("seed", 0))
   key, init_key = jax.random.split(key)
