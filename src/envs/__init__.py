@@ -2,6 +2,7 @@ from .base import Env
 from .noisy import NoisyEnv, NoisyEnvState
 from .goofspiel import Goofspiel
 from .leduc_holdem import LeducHoldem
+from .hunl_holdem import HunlHoldem
 from .battleship import Battleship
 from .liars_dice import LiarsDice
 from .hex import Hex
@@ -17,6 +18,7 @@ from .normal_form import (
 _REGISTRY: dict[str, type] = {
   "goofspiel": Goofspiel,
   "leduc": LeducHoldem,
+  "hunl": HunlHoldem,
   "battleship": Battleship,
   "liars_dice": LiarsDice,
   "hex": Hex,
