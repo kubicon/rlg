@@ -12,6 +12,11 @@ class MagnetUpdateType(StrEnum):
   INCREMENTAL = "incremental"
 
 
+class KLDirection(StrEnum):
+  FORWARD = "forward"   # KL(magnet ‖ current) — mode-covering
+  REVERSE = "reverse"   # KL(current ‖ magnet) — mode-seeking (default)
+
+
 MMD_SCHEDULABLE = frozenset({
   "clip_eps", "vf_coef", "ent_coef",
   "magnet_coef", "old_policy_coef",

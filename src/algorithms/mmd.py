@@ -35,7 +35,7 @@ from ..agents.base import Agent
 from ..envs.base import Env
 from ..losses.mmd import mmd_loss
 from ..policy import policy_probs, policy_log_probs, policy_kl
-from .types import LossType, MagnetUpdateType, MMD_SCHEDULABLE
+from .types import LossType, MagnetUpdateType, KLDirection, MMD_SCHEDULABLE
 
 
 class MMD(PPOBase):
@@ -95,6 +95,7 @@ class MMD(PPOBase):
     alpha: float = 1.0,
     alternating: bool = False,
     regularize_value: bool = False,
+    kl_direction: KLDirection = KLDirection.REVERSE,
     schedules: dict[str, Callable[[int], float]] | None = None,
   ) -> None:
     super().__init__(
@@ -125,6 +126,7 @@ class MMD(PPOBase):
     self.neurd_threshold = neurd_threshold
     self.alternating = alternating
     self.regularize_value = regularize_value
+    self.kl_direction = kl_direction
     schedules = schedules or {}
     unknown = set(schedules) - MMD_SCHEDULABLE
     if unknown:
@@ -230,7 +232,7 @@ class MMD(PPOBase):
         agent_out = self._eval_params(params, episodes)
 
         if self.loss_type == LossType.MMD:
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
+          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
           loss_P = jax.vmap(mmd_loss, in_axes=_axes)
           loss_TP = jax.vmap(loss_P, in_axes=_axes)
           loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
@@ -250,6 +252,7 @@ class MMD(PPOBase):
             magnet_coef,
             old_policy_coef,
             alpha,
+            self.kl_direction,
           )
         elif self.loss_type == LossType.RNAD:
           _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)

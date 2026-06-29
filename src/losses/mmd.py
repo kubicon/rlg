@@ -1,6 +1,7 @@
 from .ppo import ppo_policy_loss, ppo_value_loss
 import jax
 from ..policy import policy_probs, policy_log_probs, policy_entropy_loss, policy_kl
+from ..algorithms.types import KLDirection
 
 
 def mmd_loss(
@@ -19,6 +20,7 @@ def mmd_loss(
   magnet_coef: float,
   old_policy_coef: float,
   alpha: float = 1.0,
+  kl_direction: KLDirection = KLDirection.REVERSE,
 ) -> tuple[jax.Array, dict]:
   strategy = policy_probs(logits, legal_actions, alpha)  # (A,)
   log_probs_all = policy_log_probs(logits, legal_actions, alpha)  # (A,)
@@ -30,10 +32,15 @@ def mmd_loss(
   log_prob = log_probs_all[actions]
   sample_log_prob = sample_log_probs_all[actions]
 
+  if kl_direction == KLDirection.FORWARD:
+    _magnet_kl = lambda p, lp, q, lq: policy_kl(q, lq, p, lp, alpha)
+  else:
+    _magnet_kl = lambda p, lp, q, lq: policy_kl(p, lp, q, lq, alpha)
+
   policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantages, clip_eps)
   value_loss = ppo_value_loss(values, sample_values, returns, clip_eps)
-  magnet_loss = policy_kl(strategy, log_probs_all, magnet_strategy, magnet_log_probs_all, alpha)
-  old_kl_loss = policy_kl(strategy, log_probs_all, sample_strategy, sample_log_probs_all, alpha)
+  magnet_loss = _magnet_kl(strategy, log_probs_all, magnet_strategy, magnet_log_probs_all)
+  old_kl_loss = _magnet_kl(strategy, log_probs_all, sample_strategy, sample_log_probs_all)
   entropy_loss = policy_entropy_loss(strategy, log_probs_all, alpha)
   total = (
     policy_loss
