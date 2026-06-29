@@ -26,8 +26,6 @@ import jax.numpy as jnp
 import jax.lax as lax
 import optax
 
-from ..losses.rnad import rnad_loss
-
 from .base import TrainingState
 from .episode import collect_episodes
 from .ppo import PPOBase
@@ -234,52 +232,31 @@ class MMD(PPOBase):
       def total_loss(params):
         agent_out = self._eval_params(params, episodes)
 
-        if self.loss_type == LossType.MMD:
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
-          loss_P = jax.vmap(mmd_loss, in_axes=_axes)
-          loss_TP = jax.vmap(loss_P, in_axes=_axes)
-          loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
-          losses, metrics = loss_BTP(
-            agent_out.value,
-            agent_out.logits,
-            episodes.legal_actions,
-            episodes.actions,
-            episodes.agent_output.logits,  # trajectory sampling policy
-            episodes.agent_output.value,
-            magnet_logits,
-            advantages,
-            targets,
-            clip_eps,
-            vf_coef,
-            ent_coef,
-            magnet_coef,
-            old_policy_coef,
-            alpha,
-            self.kl_direction,
-          )
-        elif self.loss_type == LossType.RNAD:
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
-          loss_P = jax.vmap(rnad_loss, in_axes=_axes)
-          loss_TP = jax.vmap(loss_P, in_axes=_axes)
-          loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
-          losses, metrics = loss_BTP(
-            agent_out.value,
-            agent_out.logits,
-            episodes.legal_actions,
-            episodes.actions,
-            episodes.agent_output.logits,  # trajectory sampling policy
-            episodes.agent_output.value,
-            magnet_logits,
-            advantages,
-            targets,
-            clip_eps,
-            vf_coef,
-            ent_coef,
-            magnet_coef,
-            neurd_clip,
-            neurd_threshold,
-            alpha,
-          )
+        _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None, None, None, None)
+        loss_P = jax.vmap(mmd_loss, in_axes=_axes)
+        loss_TP = jax.vmap(loss_P, in_axes=_axes)
+        loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
+        losses, metrics = loss_BTP(
+          agent_out.value,
+          agent_out.logits,
+          episodes.legal_actions,
+          episodes.actions,
+          episodes.agent_output.logits,  # trajectory sampling policy
+          episodes.agent_output.value,
+          magnet_logits,
+          advantages,
+          targets,
+          clip_eps,
+          vf_coef,
+          ent_coef,
+          magnet_coef,
+          old_policy_coef,
+          neurd_clip,
+          neurd_threshold,
+          alpha,
+          self.kl_direction,
+          self.loss_type,
+        )
         if self.alternating:
           wmean = lambda x: self._wmean(x * player_mask, valid)
         else:
