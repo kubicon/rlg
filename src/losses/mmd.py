@@ -68,7 +68,7 @@ def mmd_loss(
     _kl = lambda p, lp, q, lq: policy_kl(p, lp, q, lq, alpha)
 
   if loss_type == LossType.RNAD:
-    regrets = estimate_baseline_regrets(values, advantages, strategy, sample_strategy, actions)
+    regrets = estimate_baseline_regrets(values + jnp.zeros_like(logits), advantages, strategy, sample_strategy, actions)
     policy_loss = -neurd_loss(logits, legal_actions, regrets, neurd_clip, neurd_threshold)
   else:
     log_prob = log_probs_all[actions]
