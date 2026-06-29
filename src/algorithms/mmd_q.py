@@ -98,6 +98,7 @@ class QMMD(PPOBase):
     grad_clip: float | None = None,
     alpha: float = 1.0,
     alternating: bool = False,
+    normalize_rewards: bool = True,
     schedules: dict[str, Callable[[int], float]] | None = None,
   ) -> None:
     super().__init__(
@@ -116,6 +117,7 @@ class QMMD(PPOBase):
       optimizer=optimizer,
       grad_clip=grad_clip,
       alpha=alpha,
+      normalize_rewards=normalize_rewards,
     )
     self.vf_coef = vf_coef
     self.loss_type = loss_type
@@ -204,6 +206,7 @@ class QMMD(PPOBase):
     _, _, _, episodes = collect_episodes(
       self.env, self.agent, state.params, collect_key, self.batch_size,
       alpha=alpha,
+      normalize_rewards=self.normalize_rewards,
     )
 
     # ── Retrace targets: target-net Q-values, on-policy rollout policy ──────

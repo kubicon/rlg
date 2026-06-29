@@ -96,6 +96,7 @@ class MMD(PPOBase):
     alternating: bool = False,
     regularize_value: bool = False,
     kl_direction: KLDirection = KLDirection.REVERSE,
+    normalize_rewards: bool = True,
     schedules: dict[str, Callable[[int], float]] | None = None,
   ) -> None:
     super().__init__(
@@ -114,6 +115,7 @@ class MMD(PPOBase):
       optimizer,
       grad_clip,
       alpha,
+      normalize_rewards,
     )
     self.magnet_coef = magnet_coef
     self.old_policy_coef = old_policy_coef
@@ -169,6 +171,7 @@ class MMD(PPOBase):
     _, _, _, episodes = collect_episodes(
       self.env, self.agent, state.params, collect_key, self.batch_size,
       alpha=alpha,
+      normalize_rewards=self.normalize_rewards,
     )
 
     # Both auxiliary networks are fixed across all epochs — precompute once.

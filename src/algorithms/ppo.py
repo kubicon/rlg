@@ -56,6 +56,7 @@ class PPOBase(Algorithm):
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
     alpha: float = 1.0,
+    normalize_rewards: bool = True,
   ) -> None:
     self.env = env
     self.agent = agent
@@ -72,6 +73,7 @@ class PPOBase(Algorithm):
     # Normalise to float so the softmax fast-path predicate stays a clean
     # ``isinstance(alpha, float)`` check (a scheduled alpha arrives as a tracer).
     self.alpha = float(alpha)
+    self.normalize_rewards = normalize_rewards
     base_optimizer = optimizer if optimizer is not None else optax.adam(lr)
     self.optimizer = (
       optax.chain(optax.clip_by_global_norm(grad_clip), base_optimizer)
@@ -191,6 +193,7 @@ class PPO(PPOBase):
     _, _, _, episodes = collect_episodes(
       self.env, self.agent, state.params, collect_key, self.batch_size,
       alpha=self.alpha,
+      normalize_rewards=self.normalize_rewards,
     )
 
     # Target values are fixed across all epochs — precompute once.
