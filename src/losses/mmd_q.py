@@ -29,6 +29,7 @@ import jax.numpy as jnp
 from .ppo import ppo_policy_loss, ppo_value_loss
 from .neurd import neurd_loss
 from ..policy import policy_probs, policy_log_probs, policy_entropy_loss, policy_kl
+from .mmd import estimate_baseline_regrets
 from ..algorithms.types import KLDirection, LossType
 
 
@@ -67,17 +68,14 @@ def mmd_q_loss(
     _kl = lambda p, lp, q, lq: policy_kl(p, lp, q, lq, alpha)
 
   # Q-vector: target-net for all actions, Retrace target for the sampled action.
-  q_vec = target_q_values.at[actions].set(q_target)
-
   if loss_type == LossType.RNAD:
-    # nan-safe centering: α-entmax may assign zero mass to legal actions,
-    # where the regularised Q can be ±inf; mask by pi>0 to avoid inf·0=nan.
-    baseline = jnp.sum(jnp.where(pi > 0, q_vec * pi, 0.0))
-    regrets = q_vec - baseline
+    advantage = q_target - jnp.take_along_axis(q_values, actions[None], axis=-1)
+    regrets = estimate_baseline_regrets(q_values, advantage, pi, sample_pi, actions)
     policy_loss = -neurd_loss(logits, legal_actions, regrets, neurd_clip, neurd_threshold)
   else:
     log_prob = log_probs_all[actions]
     sample_log_prob = sample_log_probs_all[actions]
+    q_vec = target_q_values.at[actions].set(q_target)
     v_baseline = jnp.dot(q_vec, pi)
     advantage = q_target - v_baseline
     policy_loss = ppo_policy_loss(log_prob, sample_log_prob, advantage, clip_eps)
