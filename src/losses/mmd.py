@@ -28,6 +28,12 @@ def estimate_baseline_regrets(
   return regrets
 
 
+def rnad_regularization(
+  log_probs: jax.Array, magnet_log_probs: jax.Array, magnet_coef: float
+) -> jax.Array:
+  return magnet_coef * (log_probs - magnet_log_probs)
+
+
 def mmd_loss(
   values: jax.Array,
   logits: jax.Array,

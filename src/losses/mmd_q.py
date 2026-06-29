@@ -27,7 +27,7 @@ import jax.numpy as jnp
 
 from .ppo import ppo_policy_loss, ppo_value_loss
 from .neurd import neurd_loss
-from .rnad import estimate_baseline_regrets, rnad_regularization
+from .mmd import estimate_baseline_regrets, rnad_regularization
 from ..policy import policy_probs, policy_log_probs, policy_entropy_loss, policy_kl
 
 
