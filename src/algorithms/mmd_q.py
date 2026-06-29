@@ -41,11 +41,11 @@ import optax
 from .base import TrainingState
 from .episode import collect_episodes
 from .ppo import PPOBase
-from .types import LossType, MagnetUpdateType, MMD_SCHEDULABLE
+from .types import KLDirection, LossType, MagnetUpdateType, MMD_SCHEDULABLE
 from ..agents.base import Agent
 from ..envs.base import Env
 from ..advantage import retrace
-from ..losses.mmd_q import mmd_q_loss, rnad_q_loss
+from ..losses.mmd_q import mmd_q_loss
 from ..policy import policy_probs
 
 
@@ -94,6 +94,7 @@ class QMMD(PPOBase):
     loss_type: LossType = LossType.MMD,
     neurd_clip: float = 5.0,
     neurd_threshold: float = 2.0,
+    kl_direction: KLDirection = KLDirection.REVERSE,
     optimizer: optax.GradientTransformation | None = None,
     grad_clip: float | None = None,
     alpha: float = 1.0,
@@ -123,6 +124,7 @@ class QMMD(PPOBase):
     self.loss_type = loss_type
     self.neurd_clip = neurd_clip
     self.neurd_threshold = neurd_threshold
+    self.kl_direction = kl_direction
     self.magnet_coef = magnet_coef
     self.old_policy_coef = old_policy_coef
     self.target_update_rate = target_update_rate
@@ -247,53 +249,32 @@ class QMMD(PPOBase):
       def total_loss(params):
         agent_out = self._eval_params(params, episodes)
 
-        if self.loss_type == LossType.MMD:
-          # 9 arrays + 6 scalars
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
-          loss_P = jax.vmap(mmd_q_loss, in_axes=_axes)
-          loss_TP = jax.vmap(loss_P, in_axes=_axes)
-          loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
-          losses, metrics = loss_BTP(
-            agent_out.q_values,                 # (B,T,P,A)
-            agent_out.logits,                   # (B,T,P,A)
-            episodes.legal_actions,             # (B,T,P,A)
-            episodes.actions,                   # (B,T,P)
-            episodes.agent_output.logits,       # (B,T,P,A) — sampling π
-            episodes.agent_output.q_values,     # (B,T,P,A) — sampling Q
-            magnet_logits,                      # (B,T,P,A)
-            q_targets,                          # (B,T,P)
-            target_q_values,                    # (B,T,P,A)
-            clip_eps,
-            vf_coef,
-            ent_coef,
-            magnet_coef,
-            old_policy_coef,
-            alpha,
-          )
-        elif self.loss_type == LossType.RNAD:
-          # 9 arrays + 7 scalars
-          _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
-          loss_P = jax.vmap(rnad_q_loss, in_axes=_axes)
-          loss_TP = jax.vmap(loss_P, in_axes=_axes)
-          loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
-          losses, metrics = loss_BTP(
-            agent_out.q_values,                 # (B,T,P,A)
-            agent_out.logits,                   # (B,T,P,A)
-            episodes.legal_actions,             # (B,T,P,A)
-            episodes.actions,                   # (B,T,P)
-            episodes.agent_output.logits,       # (B,T,P,A) — sampling π
-            episodes.agent_output.q_values,     # (B,T,P,A) — sampling Q
-            magnet_logits,                      # (B,T,P,A)
-            q_targets,                          # (B,T,P)
-            target_q_values,                    # (B,T,P,A)
-            clip_eps,
-            vf_coef,
-            ent_coef,
-            magnet_coef,
-            neurd_clip,
-            neurd_threshold,
-            alpha,
-          )
+        # 9 arrays + 10 scalars
+        _axes = (0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None, None, None, None)
+        loss_P = jax.vmap(mmd_q_loss, in_axes=_axes)
+        loss_TP = jax.vmap(loss_P, in_axes=_axes)
+        loss_BTP = jax.vmap(loss_TP, in_axes=_axes)
+        losses, metrics = loss_BTP(
+          agent_out.q_values,                 # (B,T,P,A)
+          agent_out.logits,                   # (B,T,P,A)
+          episodes.legal_actions,             # (B,T,P,A)
+          episodes.actions,                   # (B,T,P)
+          episodes.agent_output.logits,       # (B,T,P,A) — sampling π
+          episodes.agent_output.q_values,     # (B,T,P,A) — sampling Q
+          magnet_logits,                      # (B,T,P,A)
+          q_targets,                          # (B,T,P)
+          target_q_values,                    # (B,T,P,A)
+          clip_eps,
+          vf_coef,
+          ent_coef,
+          magnet_coef,
+          old_policy_coef,
+          neurd_clip,
+          neurd_threshold,
+          alpha,
+          self.kl_direction,
+          self.loss_type,
+        )
 
         if self.alternating:
           wmean = lambda x: self._wmean(x * player_mask, valid)
